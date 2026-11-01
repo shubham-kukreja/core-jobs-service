@@ -1,0 +1,26 @@
+# Mocks of module contracts, so teams code against other modules' interfaces.
+# Regenerate with `make mocks` after changing any contract.go.
+all: true
+template: matryer
+dir: "{{.InterfaceDir}}/mocks"
+filename: "{{.InterfaceName | snakecase}}.go"
+pkgname: mocks
+structname: "{{.InterfaceName}}"
+include-auto-generated: false
+packages:
+  github.com/shubham-kukreja/core-jobs-service/internal/catalog: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/datapoints: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/derive: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/ingest: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/model: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/auth: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/audit: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/market: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/analytics: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/quality: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/notes: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/platform/blob: {}
+  github.com/shubham-kukreja/core-jobs-service/internal/jobs:
+    config:
+      # Handler is generic and adapted by HandlerFunc; mock the rest.
+      exclude-interface-regex: "^(Handler|Args)$"
