@@ -1,0 +1,21 @@
+# Build output
+/bin/
+coverage.out
+*.test
+
+# Local environment and secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Uploaded or exported data must not land in the repo
+/tmp/
+*.xlsx
+!testdata/**/*.xlsx

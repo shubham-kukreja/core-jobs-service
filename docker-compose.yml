@@ -1,0 +1,38 @@
+# Local development only. Credentials here are throwaway dev values; real
+# environments inject secrets from a secret manager (see docs/security.md).
+name: core-jobs
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_DB: core
+      POSTGRES_USER: core_owner
+      POSTGRES_PASSWORD: dev_owner_password
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core_owner -d core"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # S3-compatible object store (MinIO no longer publishes pullable images).
+  s3:
+    image: chrislusf/seaweedfs:3.97
+    command: server -dir=/data -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json
+    ports: ["127.0.0.1:9000:9000"]
+    volumes:
+      - s3data:/data
+      - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9333/cluster/status"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+volumes:
+  pgdata:
+  s3data:
