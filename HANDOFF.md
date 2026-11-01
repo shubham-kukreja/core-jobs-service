@@ -4,6 +4,30 @@ Shared log between the lead and teams. Newest entry first. Each entry says
 what's done, what's next, and any contract change. The plan is `docs/plan.md`
 and security rules are in `docs/security.md`.
 
+## 2026-11-01 — T7 Verify (lead, P1-T7-01/02)
+
+**Done**
+
+- `testdata/sheet_v2/`: the golden fixture format (see its `README.md`) and
+  three scenarios built from the plan's worked numbers:
+  - L1 tilts and final weights.
+  - Sector sleeve carve-out.
+  - Veto capping.
+- `e2e/golden`: `Load` and `Compare` (0.05pp tolerance), plus an independent
+  formula oracle. It proves each fixture is internally consistent, so T5 can
+  trust the targets.
+
+**Found**
+
+- The plan's lineage example prints `tilt.equity.small = -0.101` (composite
+  33.3, cap 0.30). Its own formula gives -0.1002, which is 0.08pp off and so
+  outside the gate tolerance. The fixture uses the formula value; to confirm
+  against the workbook.
+
+**Next:** replace `source: plan_worked_example` with workbook fixtures once
+the file is available (all 85 scores, every composite, tilt, final and
+rollup weight). That task is still blocked on the workbook.
+
 ## 2026-11-01 — Phase 0 (lead)
 
 **Done**
