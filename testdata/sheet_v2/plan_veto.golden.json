@@ -1,0 +1,32 @@
+{
+  "name": "plan_veto",
+  "description": "Veto keeps a negative tilt and zeroes a positive one (plan tilt formula). The plan's lineage example prints tilt.equity.small = -0.101 for composite 33.3 and cap 0.30, but its own formula gives (33.3-50)/50*0.30 = -0.1002; the formula value is used and the discrepancy is listed in HANDOFF.md.",
+  "source": "plan_worked_example",
+  "as_of": "2026-10-31",
+  "tolerance_pp": 0.05,
+  "neutral": {},
+  "scorecards": {
+    "equity": {
+      "tilt_cap": 0.3,
+      "buckets": [
+        "equity.small",
+        "equity.mid"
+      ]
+    }
+  },
+  "inputs": {
+    "composite": {
+      "equity.small": 33.3,
+      "equity.mid": 70.0
+    },
+    "veto": {
+      "equity.small": true,
+      "equity.mid": true
+    }
+  },
+  "params": {},
+  "expected": {
+    "tilt.equity.small": -0.1002,
+    "tilt.equity.mid": 0.0
+  }
+}

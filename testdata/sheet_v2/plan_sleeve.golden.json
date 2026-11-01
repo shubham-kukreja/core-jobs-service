@@ -1,0 +1,17 @@
+{
+  "name": "plan_sleeve",
+  "description": "Sector sleeve carve-out from Model engine > Formulas: Large Cap core = 46.6% x (1 - 0.15 x 1/2).",
+  "source": "plan_worked_example",
+  "as_of": "2026-10-31",
+  "tolerance_pp": 0.05,
+  "neutral": {},
+  "scorecards": {"sector_satellite": {"sleeve_cap": 0.15, "max_sectors": 2}},
+  "inputs": {
+    "within_group_normalized": {"equity.large": 0.466}
+  },
+  "params": {"sectors_held": ["sector.capgoods"]},
+  "expected": {
+    "sleeve.l1.equity": 0.075,
+    "core.equity.large": 0.431
+  }
+}

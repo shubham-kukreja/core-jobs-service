@@ -1,0 +1,23 @@
+{
+  "name": "plan_l1",
+  "description": "L1 asset-class tilts from the plan's GET /v1/runs/{id} example and the Debt worked check in Model engine > Formulas.",
+  "source": "plan_worked_example",
+  "as_of": "2026-10-31",
+  "tolerance_pp": 0.05,
+  "neutral": {"l1.equity": 0.55, "l1.debt": 0.35, "l1.metals": 0.10},
+  "scorecards": {"l1": {"tilt_cap": 0.20, "buckets": ["l1.equity", "l1.debt", "l1.metals"]}},
+  "inputs": {
+    "composite": {"l1.equity": 50.5, "l1.debt": 57.5, "l1.metals": 51.3},
+    "veto": {"l1.equity": false, "l1.debt": false, "l1.metals": false}
+  },
+  "params": {},
+  "expected": {
+    "tilt.l1.equity": 0.002,
+    "tilt.l1.debt": 0.030,
+    "tilt.l1.metals": 0.005,
+    "preliminary.l1.debt": 0.3605,
+    "final.l1.equity": 0.545,
+    "final.l1.debt": 0.356,
+    "final.l1.metals": 0.099
+  }
+}
