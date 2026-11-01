@@ -19,3 +19,6 @@ coverage.out
 /tmp/
 *.xlsx
 !testdata/**/*.xlsx
+
+# Claude Code local state and agent worktrees
+.claude/
