@@ -1,0 +1,4415 @@
+openapi: 3.1.0
+info:
+  title: CORE Allocation Intelligence API
+  version: 1.0.0
+  summary: Backend for the CORE dashboard (core.arviawealth.com).
+  description: |
+    JSON over HTTPS. All application endpoints live under `/v1`.
+
+    **Authentication.** Browsers sign in with `POST /v1/auth/login`, which sets two cookies:
+    `core_session` (the session token; `HttpOnly; Secure; SameSite=Strict; Path=/`) and
+    `core_csrf` (the CSRF token, readable by the frontend; `Secure; SameSite=Strict; Path=/`).
+    Every unsafe request (POST, PATCH, PUT, DELETE) authenticated by cookie must echo the CSRF
+    token in the `X-CSRF-Token` header, and must carry an `Origin` header that matches an
+    allowed origin. Programmatic clients use `Authorization: Bearer <api_key>` instead; API-key
+    requests need no CSRF token. Sessions expire after `SESSION_IDLE_TTL` of inactivity and after
+    `SESSION_ABSOLUTE_TTL` in total; logout, password change and user disable revoke them.
+
+    **Authorization.** Roles are ordered `admin ⊃ analyst ⊃ viewer`. Each operation states its
+    minimum role in `x-required-role`. A request below that role gets `403 forbidden`.
+
+    **Privacy.** Responses never contain password hashes, session tokens or their hashes, API-key
+    secrets (except once, at creation), CSRF hashes or blob storage URIs. Users are referred to by
+    UUID, name or email only.
+
+    **Conventions.** `obs_date` and `as_of` are `YYYY-MM-DD` (IST calendar). Timestamps are
+    RFC 3339 UTC. Reads accept `?cutoff=<timestamp>` (point-in-time, default now). Lists use
+    `?limit=&cursor=` and return `{"data": […], "next_cursor": "…"}`; cursors are opaque and
+    signed. POSTs that create work accept an `Idempotency-Key` header; replaying a key with a
+    different body returns `422 idempotency_mismatch`. Long work returns `202 Accepted` with
+    `{"job_run": {…}}`; poll `GET /v1/jobs/{id}` or stream `GET /v1/jobs/{id}/events`.
+
+    **Limits.** JSON bodies are capped at `MAX_REQUEST_BYTES` (default 1 MiB) and uploads at
+    `MAX_UPLOAD_BYTES` (default 20 MiB); larger bodies get `413 payload_too_large`. Unknown
+    request fields are rejected. Rate limits return `429 rate_limited` with `Retry-After`.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  contact:
+    name: Arvia Wealth engineering
+servers:
+  - url: /
+    description: Same origin as the CORE frontend (TLS only).
+security:
+  - sessionCookie: []
+  - bearerApiKey: []
+tags:
+  - name: Auth
+    description: 'Login, logout and the current user.'
+  - name: Catalog
+    description: 'Entities, sources and series definitions.'
+  - name: Datapoints
+    description: 'Bitemporal values, point-in-time reads and lineage.'
+  - name: Imports
+    description: 'File uploads and import mappings for seeding history.'
+  - name: Jobs
+    description: 'Job kinds, runs, progress and control.'
+  - name: Schedules
+    description: 'When job kinds run.'
+  - name: Model configs
+    description: 'Versioned model definitions.'
+  - name: Runs
+    description: 'Model runs, run values, allocations and node overrides.'
+  - name: Risk profiles
+    description: 'Neutral weights per investor type.'
+  - name: Portfolio
+    description: 'The CORE Overview screen.'
+  - name: Draft
+    description: 'The shared draft, live preview and rubrics.'
+  - name: Signals
+    description: 'Signal contributions, attribution, sensitivity and fragility.'
+  - name: Registry
+    description: 'The Data Points screen.'
+  - name: Versions
+    description: 'Saved reviews and publications.'
+  - name: Backtests
+    description: 'Backtests, funds and benchmarks.'
+  - name: Notes
+    description: 'Analyst notes with references.'
+  - name: Workspace
+    description: 'Cadence, search and data quality.'
+  - name: Audit
+    description: 'Who changed what.'
+  - name: Health
+    description: 'Probes. Not authenticated.'
+
+paths:
+  # ---------------------------------------------------------------- Auth
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in with email and password
+      description: |
+        On success, rotates any existing session, sets the `core_session` and `core_csrf`
+        cookies and returns the user. Unknown email and wrong password return the same `401`
+        with the same timing. After repeated failures for an email or from an IP, `429` is
+        returned whether or not the account exists, so the response never reveals which
+        emails are registered.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LoginRequest'}
+            example: {email: shubham@arviawealth.com, password: correct-horse-battery-staple}
+      responses:
+        '200':
+          description: Signed in.
+          headers:
+            Set-Cookie:
+              description: '`core_session=…; HttpOnly; Secure; SameSite=Strict; Path=/` and `core_csrf=…; Secure; SameSite=Strict; Path=/`.'
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginResponse'}
+              example: {user: {id: 0b8f2d4e-1c3a-4f5b-9d6e-7a8b9c0d1e2f, email: shubham@arviawealth.com, name: Shubham Kukreja, role: admin}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Sign out and revoke the session
+      x-required-role: viewer
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      responses:
+        '204':
+          description: Signed out; both cookies are cleared.
+          headers:
+            Set-Cookie:
+              description: Expires `core_session` and `core_csrf`.
+              schema: {type: string}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/me:
+    get:
+      tags: [Auth]
+      operationId: getMe
+      summary: The current user
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The authenticated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: {$ref: '#/components/schemas/User'}
+              example: {user: {id: 0b8f2d4e-1c3a-4f5b-9d6e-7a8b9c0d1e2f, email: shubham@arviawealth.com, name: Shubham Kukreja, role: admin}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Catalog
+  /v1/entities:
+    get:
+      tags: [Catalog]
+      operationId: listEntities
+      summary: List entities
+      x-required-role: viewer
+      parameters:
+        - name: kind
+          in: query
+          schema: {$ref: '#/components/schemas/EntityKind'}
+      responses:
+        '200':
+          description: Entities.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Entity'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Catalog]
+      operationId: createEntity
+      summary: Create an entity
+      x-required-role: admin
+      security: &unsafe
+        - sessionCookie: []
+          csrfToken: []
+        - bearerApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EntityInput'}
+            example: {key: sector.capgoods, kind: sector, name: Capital Goods, parent: l1.equity}
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Entity'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/entities/{key}:
+    parameters:
+      - $ref: '#/components/parameters/EntityKey'
+    patch:
+      tags: [Catalog]
+      operationId: updateEntity
+      summary: Update an entity
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EntityPatch'}
+            example: {name: Capital Goods & Industrials}
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Entity'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/series:
+    get:
+      tags: [Catalog]
+      operationId: listSeries
+      summary: List series
+      x-required-role: viewer
+      parameters:
+        - {name: layer, in: query, schema: {$ref: '#/components/schemas/Layer'}}
+        - {name: entity, in: query, schema: {$ref: '#/components/schemas/Key'}}
+        - {name: tag, in: query, schema: {type: string, pattern: '^[a-z0-9_]{1,32}$'}}
+        - {name: group, in: query, schema: {$ref: '#/components/schemas/RegistryGroup'}}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of series.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: {type: array, items: {$ref: '#/components/schemas/Series'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Catalog]
+      operationId: createSeries
+      summary: Create a series
+      description: |
+        Saving a derivation validates its params, rejects dependency cycles with `409 conflict`,
+        rebuilds `series_deps`, and enqueues `derive.cascade` in rebuild mode for history.
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SeriesInput'}
+            example:
+              key: pctile.180m.spread.mid_large
+              name: Mid–Large P/E spread percentile (15Y)
+              entity: equity.mid
+              layer: percentile
+              value_type: num
+              unit: pctile
+              frequency: monthly
+              validation: {min: 0, max: 100}
+              min_history: 24
+              derivation: {fn: percentile_rank, inputs: {x: spread.mid_large}, params: {window_months: 180}}
+              tags: [data_trackers]
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SeriesSaved'}
+              example:
+                key: pctile.180m.spread.mid_large
+                layer: percentile
+                derivation_ver: 1
+                deps: [spread.mid_large]
+                rebuild_job: {id: a1c2e3f4-5b6c-4d7e-8f90-a1b2c3d4e5f6, kind: derive.cascade, args: {mode: rebuild, series: [pctile.180m.spread.mid_large]}, status: queued}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/series/{key}:
+    parameters:
+      - $ref: '#/components/parameters/SeriesKey'
+    get:
+      tags: [Catalog]
+      operationId: getSeries
+      summary: Get a series
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The series.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Series'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+    patch:
+      tags: [Catalog]
+      operationId: updateSeries
+      summary: Update a series
+      description: A changed derivation bumps `derivation_ver` and enqueues a rebuild, like create.
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SeriesPatch'}
+            example: {derivation: {fn: percentile_rank, inputs: {x: spread.mid_large}, params: {window_months: 120}}}
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SeriesSaved'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/series/{key}/deps:
+    parameters:
+      - $ref: '#/components/parameters/SeriesKey'
+    get:
+      tags: [Catalog]
+      operationId: getSeriesDeps
+      summary: Upstream or downstream dependencies
+      x-required-role: viewer
+      parameters:
+        - {name: direction, in: query, schema: {type: string, enum: [up, down], default: up}}
+        - {name: depth, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 3}}
+      responses:
+        '200':
+          description: Dependency edges.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/DepEdge'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/series/{key}/explain:
+    parameters:
+      - $ref: '#/components/parameters/SeriesKey'
+    get:
+      tags: [Registry]
+      operationId: explainSeries
+      summary: Formula breakdown of a series' latest value
+      description: Generated from each primitive's `Explain`, never hand-written.
+      x-required-role: viewer
+      parameters:
+        - {name: obs_date, in: query, schema: {type: string, format: date}}
+        - $ref: '#/components/parameters/Cutoff'
+      responses:
+        '200':
+          description: The explanation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Explanation'}
+              example:
+                key: l1.equity::valuation
+                score: 84.9
+                sources: [NSE, FRED]
+                observed: '2026-10-09'
+                freshness: stale
+                formula: score = (a + b) / 2
+                inputs:
+                  - {key: pe.nifty50, label: Nifty 50 trailing P/E, value: 19.27, source: NSE, observed: '2026-10-09'}
+                  - {key: yield.gsec10y, label: 10Y G-sec yield, value: 6.78, unit: '%', source: FRED, observed: '2026-07-01'}
+                parts:
+                  - id: a
+                    title: Earnings-yield gap
+                    result: 70.3
+                    direction: as_is
+                    steps: [Earnings yield = 100 ÷ 20.78 = 4.81%, Gap = 4.81% − 6.78% = −1.97%, 'PERCENTRANK(708 readings over 10.7y, −1.97%) × 100 = 70.3']
+                  - id: b
+                    title: P/E percentile
+                    result: 99.5
+                    direction: inverted
+                    steps: ['PERCENTRANK(755 readings over 10.9y, 19.27) × 100 = 0.53', 100 − 0.53 = 99.5]
+                final: (70.30 + 99.47) / 2 = 84.9
+                notes: [Part a month-joins a daily P/E to a monthly yield; its newest point is the last month both exist.]
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/sources:
+    get:
+      tags: [Catalog]
+      operationId: listSources
+      summary: List sources
+      x-required-role: viewer
+      responses:
+        '200':
+          description: Sources. Connector settings and credential references are not returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Source'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/sources/{key}/refresh:
+    parameters:
+      - $ref: '#/components/parameters/SourceKey'
+    post:
+      tags: [Registry]
+      operationId: refreshSource
+      summary: Fetch a source now
+      description: Enqueues the source's fetch job, or returns `409 not_available` while its connector is not built.
+      x-required-role: analyst
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': {$ref: '#/components/responses/JobAccepted'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/registry:
+    get:
+      tags: [Registry]
+      operationId: getRegistry
+      summary: Every tracked input with freshness (Data Points screen)
+      x-required-role: viewer
+      parameters:
+        - {name: group, in: query, schema: {$ref: '#/components/schemas/RegistryGroup'}}
+        - {name: source, in: query, schema: {type: string, enum: [all, live, mock], default: all}}
+        - {name: group_by, in: query, schema: {type: string, enum: [asset_class, update_type, owner, none], default: none}}
+      responses:
+        '200':
+          description: Registry rows and totals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Registry'}
+              example:
+                totals: {tracked: 110, live: 104, mock: 6, by_group: {equity: 57, debt: 18, metals: 11, governance: 15, veto: 9}}
+                rows:
+                  - key: equity.large::valuation
+                    name: Large Cap - Valuation
+                    group: equity
+                    update_type: derived
+                    source: Model pipeline
+                    owner: System
+                    value: 99.1
+                    freshness: stale
+                    frequency: daily
+                    last_updated: '2026-11-01'
+                    observed_at: '2026-07-31'
+                    flags: []
+                    overridden: false
+                    upstream: [{key: pe.nifty100, value: 22.1}]
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Datapoints
+  /v1/datapoints:
+    post:
+      tags: [Datapoints]
+      operationId: writeDatapoints
+      summary: Analyst input or override (one batch)
+      description: |
+        `source` is `analyst` or `override` (override requires admin). Values are typed by the
+        series: number, boolean or an allowed category. Invalid points are returned in
+        `rejected` and do not fail the batch; if every point is rejected the response is
+        `400 validation_failed` with one detail per point.
+      x-required-role: analyst
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DatapointWrite'}
+            example:
+              source: analyst
+              points:
+                - {series: judg.rbi.stance, obs_date: '2026-10-31', value: cutting, note: 'Oct MPC cut 25bp, guidance dovish'}
+                - {series: breadth.nifty100.up, obs_date: '2026-10-31', value: 48, note: Broker X strategy note p.4}
+                - {series: 'equity.large::relvalue', obs_date: '2026-10-31', value: 60, note: 'Override: spread data incomplete'}
+      responses:
+        '201':
+          description: Batch written.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WriteResult'}
+              example: {batch_id: 5b0e8c1a-2d3f-4e5a-8b6c-7d8e9f0a1b2c, written: 3, skipped: 0, rejected: [], cascade_job: {id: c91f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a4b, kind: derive.cascade, status: queued}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/series/{key}/datapoints:
+    parameters:
+      - $ref: '#/components/parameters/SeriesKey'
+    get:
+      tags: [Datapoints]
+      operationId: listSeriesDatapoints
+      summary: Resolved values in a date range, point-in-time
+      x-required-role: viewer
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date}}
+        - $ref: '#/components/parameters/Cutoff'
+      responses:
+        '200':
+          description: One entry per observation date; dates not known at the cutoff carry a `reason`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SeriesDatapoints'}
+              example:
+                series: pctile.180m.spread.mid_large
+                cutoff: '2026-02-15T00:00:00Z'
+                data:
+                  - {id: 9012, obs_date: '2026-01-31', value: 71.4, source: computed, known_at: '2026-02-04T12:30:00Z', derivation_ver: 1}
+                  - {id: null, obs_date: '2026-02-28', value: null, source: null, known_at: null, reason: not_known_at_cutoff}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/series/{key}/datapoints/{obs_date}:
+    parameters:
+      - $ref: '#/components/parameters/SeriesKey'
+      - $ref: '#/components/parameters/ObsDate'
+    get:
+      tags: [Datapoints]
+      operationId: getSeriesDatapoint
+      summary: The resolved value at one date, point-in-time
+      x-required-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/Cutoff'
+      responses:
+        '200':
+          description: The resolved value.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResolvedPoint'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/series/{key}/datapoints/{obs_date}/versions:
+    parameters:
+      - $ref: '#/components/parameters/SeriesKey'
+      - $ref: '#/components/parameters/ObsDate'
+    get:
+      tags: [Datapoints]
+      operationId: listDatapointVersions
+      summary: Every source and revision for one date
+      x-required-role: viewer
+      responses:
+        '200':
+          description: All rows, newest first, and which one resolves now.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DatapointVersions'}
+              example:
+                resolved_id: 30411
+                versions:
+                  - {id: 30411, value: 6.70, source: override, known_at: '2026-11-01T09:10:00Z', actor: riya@arviawealth.com, note: RBI print revised, status: active}
+                  - {id: 30122, value: 6.72, source: rbi, known_at: '2026-10-31T13:45:00Z', status: active}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/datapoints/{id}/lineage:
+    parameters:
+      - $ref: '#/components/parameters/DatapointId'
+    get:
+      tags: [Datapoints]
+      operationId: getDatapointLineage
+      summary: The inputs a computed datapoint was built from, recursively
+      x-required-role: viewer
+      parameters:
+        - {name: depth, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 5}}
+      responses:
+        '200':
+          description: The lineage tree.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Lineage'}
+              example:
+                id: 41877
+                series: l1.equity::valuation
+                obs_date: '2026-10-31'
+                value: 38.0
+                derivation: {fn: avg, version: 1}
+                inputs:
+                  - id: 41850
+                    series: pctile.180m.gap.earnings_yield
+                    value: 30.0
+                    inputs: [{id: 41790, series: gap.earnings_yield, value: -2.2}]
+                  - id: 41851
+                    series: pctile.180m.pe.nifty50
+                    value: 55.0
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/datapoints/{id}/retract:
+    parameters:
+      - $ref: '#/components/parameters/DatapointId'
+    post:
+      tags: [Datapoints]
+      operationId: retractDatapoint
+      summary: Retract a datapoint
+      description: The row stays in history; reads with a cutoff after now no longer see it. Retracting twice returns `409`.
+      x-required-role: analyst
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RetractRequest'}
+            example: {reason: Entered against wrong month}
+      responses:
+        '200':
+          description: Retracted; the cascade job recomputes dependents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: {type: integer, format: int64}
+                  status: {type: string, const: retracted}
+                  cascade_job: {$ref: '#/components/schemas/JobRef'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/snapshot:
+    post:
+      tags: [Datapoints]
+      operationId: snapshot
+      summary: Many series at one date, as the model sees them
+      description: A read; POST only because the series list can be long. Needs no CSRF token beyond the usual unsafe-method rule.
+      x-required-role: viewer
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SnapshotRequest'}
+            example: {as_of: '2026-10-31', cutoff: '2026-11-01T00:00:00Z', series: ['l1.*', 'trig.*']}
+      responses:
+        '200':
+          description: Resolved values and the series with no value.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Snapshot'}
+              example:
+                as_of: '2026-10-31'
+                values:
+                  'l1.equity::valuation': {value: 45, datapoint_id: 41877, source: computed}
+                  trig.flow_froth.equity.small: {value: true, datapoint_id: 41920, source: computed}
+                missing: ['l1.metals::fundamentals']
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Imports
+  /v1/uploads:
+    post:
+      tags: [Imports]
+      operationId: createUpload
+      summary: Upload a CSV or XLSX file
+      description: |
+        `multipart/form-data` with one `file` part, at most `MAX_UPLOAD_BYTES` (default 20 MiB).
+        The content type is detected from the bytes, not the filename; only CSV and XLSX
+        (without macros) are accepted. The filename is sanitised and kept for display only.
+        Formulas are never evaluated. Uploads expire after the import retention window.
+      x-required-role: analyst
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  contentMediaType: application/octet-stream
+                  description: The file. Max 20 MiB.
+            encoding:
+              file:
+                contentType: text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        '201':
+          description: Stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Upload'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/import-mappings:
+    get:
+      tags: [Imports]
+      operationId: listImportMappings
+      summary: List import mappings
+      x-required-role: viewer
+      responses:
+        '200':
+          description: Saved mappings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/ImportMapping'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Imports]
+      operationId: saveImportMapping
+      summary: Create or update an import mapping
+      description: |
+        Every mapped series must exist and be a raw series. Derived and percentile columns
+        belong in `ignore_columns`: the system recomputes them point-in-time. `known_at` for
+        historical imports is estimated from the publication lag so backtests stay honest.
+        Saving an existing `key` creates a new mapping version.
+      x-required-role: analyst
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImportMappingInput'}
+            example:
+              key: data_trackers.rates
+              name: Data Trackers – rates log
+              sheet: Data Trackers
+              header_row_match: Month
+              date_column: {name: Month, format: Jan-2006, obs_date: month_end}
+              columns:
+                - {name: 10Y G-sec Yield %, series: yield.gsec10y}
+                - {name: Repo Rate %, series: rate.repo}
+                - {name: 3Y AAA Corp Yield %, series: yield.aaa3y}
+              ignore_columns: [AAA Spread (bps), 10Y Yield %ile, Spread %ile]
+              known_at: obs_date_plus_days:5
+      responses:
+        '201':
+          description: Saved.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImportMapping'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Jobs
+  /v1/job-kinds:
+    get:
+      tags: [Jobs]
+      operationId: listJobKinds
+      summary: Registered job kinds and their argument schemas
+      x-required-role: viewer
+      responses:
+        '200':
+          description: Kinds.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/JobKind'}}
+              example:
+                data:
+                  - kind: model.run
+                    queue: model
+                    user_triggerable: true
+                    roles: [analyst, admin]
+                    args_version: 1
+                    args_schema:
+                      type: object
+                      required: [model, as_of]
+                      properties:
+                        model: {type: string}
+                        as_of: {type: string, format: date}
+                        cutoff: {type: string, format: date-time}
+                        config_version: {type: [integer, string]}
+                        params: {type: object}
+                        publish: {type: boolean, default: false}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/jobs:
+    get:
+      tags: [Jobs]
+      operationId: listJobs
+      summary: List job runs
+      x-required-role: viewer
+      parameters:
+        - {name: kind, in: query, schema: {$ref: '#/components/schemas/Key'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/JobStatus'}}
+        - {name: trigger, in: query, schema: {$ref: '#/components/schemas/JobTrigger'}}
+        - {name: root_id, in: query, schema: {type: string, format: uuid}}
+        - {name: since, in: query, schema: {type: string, format: date-time}}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of runs, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: {type: array, items: {$ref: '#/components/schemas/JobRun'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Jobs]
+      operationId: submitJob
+      summary: Start a user-triggerable job
+      description: |
+        The minimum role depends on the kind (see `GET /v1/job-kinds`): `import.file`,
+        `veto.evaluate`, `model.run` and `quality.check` need analyst; `derive.cascade` rebuild
+        and `model.run` with `publish: true` need admin. Kinds that are not user-triggerable
+        return `400 not_user_triggerable`. Per-user concurrency limits return `429`.
+      x-required-role: analyst
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JobSubmit'}
+            examples:
+              modelRun:
+                value: {kind: model.run, args: {model: maaf, as_of: '2026-10-31', config_version: active, params: {sectors_held: [sector.capgoods]}, publish: false}}
+              qualityCheck:
+                value: {kind: quality.check, args: {as_of: '2026-11-01', checks: [stale, missing_scores]}}
+              vetoEvaluate:
+                value: {kind: veto.evaluate, args: {as_of: '2026-10-31'}}
+              importFile:
+                value: {kind: import.file, args: {upload_id: 91c4d2e8-3f5a-4b6c-9d7e-8f0a1b2c3d4e, mapping_id: data_trackers.rates, dry_run: true}}
+              rebuild:
+                value: {kind: derive.cascade, args: {mode: rebuild, series: ['pctile.180m.*'], include_downstream: true}}
+      responses:
+        '202': {$ref: '#/components/responses/JobAccepted'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      operationId: getJob
+      summary: Get a job run
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JobRun'}
+              example:
+                id: 8d2e6a1c-4b7f-4c1e-9a35-2f0b6c7d8e91
+                kind: model.run
+                args: {model: maaf, as_of: '2026-10-31'}
+                status: succeeded
+                trigger: user
+                queue: model
+                user: riya@arviawealth.com
+                attempt: 1
+                progress: 100
+                message: 8 steps complete
+                result: {run_id: f04b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d, warnings: 1}
+                parent_id: null
+                root_id: 8d2e6a1c-4b7f-4c1e-9a35-2f0b6c7d8e91
+                queued_at: '2026-11-01T12:40:02Z'
+                started_at: '2026-11-01T12:40:03Z'
+                finished_at: '2026-11-01T12:40:05Z'
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/jobs/{id}/events:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      operationId: streamJobEvents
+      summary: Stream progress and status (Server-Sent Events)
+      description: |
+        Emits `progress` and `status` events and a `: ping` comment every 15 s. The stream ends
+        after the terminal `status` event. Authentication is the same as for any GET
+        (cookie or bearer); tokens are never accepted in the query string.
+      x-required-role: viewer
+      responses:
+        '200':
+          description: An event stream.
+          content:
+            text/event-stream:
+              schema: {type: string}
+              example: |
+                event: progress
+                data: {"progress": 40, "message": "tilt: equity scorecard"}
+
+                event: status
+                data: {"status": "succeeded", "result": {"run_id": "f04b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d"}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/jobs/{id}/tree:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      operationId: getJobTree
+      summary: A run and everything it caused
+      x-required-role: viewer
+      parameters:
+        - {name: depth, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 5}}
+      responses:
+        '200':
+          description: The tree.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JobTree'}
+              example:
+                id: 11aa2b3c-4d5e-4f6a-8b7c-9d0e1f2a3b4c
+                kind: import.file
+                trigger: user
+                status: succeeded
+                result: {rows_written: 15}
+                children:
+                  - id: 22bb3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+                    kind: derive.cascade
+                    trigger: event
+                    status: succeeded
+                    result: {series: 41, rows_written: 47}
+                    children:
+                      - {id: 33cc4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e, kind: veto.evaluate, trigger: event, status: succeeded, result: {active: [equity.small]}, children: []}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/jobs/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [Jobs]
+      operationId: cancelJob
+      summary: Request cancellation
+      description: Allowed for the user who started the run, or an admin. A running job stops within a few seconds.
+      x-required-role: viewer
+      x-required-role-note: owner of the run, or admin
+      security: *unsafe
+      responses:
+        '202':
+          description: Cancellation requested.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_run]
+                properties:
+                  job_run: {$ref: '#/components/schemas/JobRun'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/jobs/{id}/retry:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [Jobs]
+      operationId: retryJob
+      summary: Retry a failed or cancelled run as a new run
+      x-required-role: admin
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': {$ref: '#/components/responses/JobAccepted'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Schedules
+  /v1/schedules:
+    get:
+      tags: [Schedules]
+      operationId: listSchedules
+      summary: List schedules
+      x-required-role: viewer
+      responses:
+        '200':
+          description: Schedules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Schedule'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Schedules]
+      operationId: createSchedule
+      summary: Create a schedule
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ScheduleInput'}
+            example:
+              name: data-due-monthly
+              kind: quality.check
+              args: {as_of: $prev_month_end, checks: [stale, missing_scores]}
+              schedule_type: calendar
+              expr: business_day:12
+              timezone: Asia/Kolkata
+              overlap_policy: skip
+              catchup_policy: latest
+              jitter_secs: 120
+              enabled: true
+      responses:
+        '201':
+          description: Created; includes `next_run_at`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Schedule'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/schedules/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+    patch:
+      tags: [Schedules]
+      operationId: updateSchedule
+      summary: Update a schedule
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SchedulePatch'}
+            example: {expr: 'business_day:14', jitter_secs: 60}
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Schedule'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/schedules/{id}/run-now:
+    parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+    post:
+      tags: [Schedules]
+      operationId: runScheduleNow
+      summary: Fire a schedule immediately
+      x-required-role: admin
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': {$ref: '#/components/responses/JobAccepted'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/schedules/{id}/pause:
+    parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+    post:
+      tags: [Schedules]
+      operationId: pauseSchedule
+      summary: Disable a schedule
+      x-required-role: admin
+      security: *unsafe
+      responses:
+        '200':
+          description: Paused.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Schedule'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/schedules/{id}/resume:
+    parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+    post:
+      tags: [Schedules]
+      operationId: resumeSchedule
+      summary: Re-enable a schedule
+      x-required-role: admin
+      security: *unsafe
+      responses:
+        '200':
+          description: Resumed; `next_run_at` recomputed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Schedule'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/schedules/{id}/preview:
+    parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+    get:
+      tags: [Schedules]
+      operationId: previewSchedule
+      summary: Next fire times
+      x-required-role: viewer
+      parameters:
+        - {name: n, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 5}}
+      responses:
+        '200':
+          description: The next `n` fire times in the schedule's timezone.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [next]
+                properties:
+                  next: {type: array, items: {type: string, format: date-time}}
+              example: {next: ['2026-11-14T09:00:00+05:30', '2026-12-14T09:00:00+05:30', '2027-01-14T09:00:00+05:30']}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Model configs
+  /v1/models/{model}/configs:
+    parameters:
+      - $ref: '#/components/parameters/ModelKey'
+    get:
+      tags: [Model configs]
+      operationId: listModelConfigs
+      summary: List config versions
+      x-required-role: viewer
+      responses:
+        '200':
+          description: Versions, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/ModelConfig'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Model configs]
+      operationId: createModelConfig
+      summary: Create a draft config from a base version and a JSON Patch
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ModelConfigCreate'}
+            example:
+              base_version: 1
+              patch:
+                - {op: replace, path: /scorecards/l1/tilt_cap, value: 0.15}
+                - {op: replace, path: /sector_satellite/qualify_threshold, value: 72}
+              note: Tighter L1 cap after annual review
+      responses:
+        '201':
+          description: Draft created. Validation problems are reported, not fatal; a draft can be used in what-if runs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelConfigCreated'}
+              example: {version: 2, status: draft, validation: {ok: true, errors: []}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/models/{model}/configs/diff:
+    parameters:
+      - $ref: '#/components/parameters/ModelKey'
+    get:
+      tags: [Model configs]
+      operationId: diffModelConfigs
+      summary: JSON Patch from one version to another
+      x-required-role: viewer
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: integer, minimum: 1}}
+        - {name: to, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200':
+          description: The patch.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, patch]
+                properties:
+                  from: {type: integer}
+                  to: {type: integer}
+                  patch: {type: array, items: {$ref: '#/components/schemas/PatchOp'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/models/{model}/configs/{version}:
+    parameters:
+      - $ref: '#/components/parameters/ModelKey'
+      - $ref: '#/components/parameters/ConfigVersion'
+    get:
+      tags: [Model configs]
+      operationId: getModelConfig
+      summary: Get a config version (`active` for the Methodology screen)
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The config.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelConfig'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/models/{model}/configs/{version}/validate:
+    parameters:
+      - $ref: '#/components/parameters/ModelKey'
+      - $ref: '#/components/parameters/ConfigVersion'
+    post:
+      tags: [Model configs]
+      operationId: validateModelConfig
+      summary: Validate a config version
+      x-required-role: admin
+      security: *unsafe
+      responses:
+        '200':
+          description: Validation result. Errors carry JSON pointers.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConfigValidation'}
+              example: {ok: false, errors: [{path: /scorecards/equity/signals, reason: weights_sum, meta: {got: 0.95}}]}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/models/{model}/configs/{version}/activate:
+    parameters:
+      - $ref: '#/components/parameters/ModelKey'
+      - $ref: '#/components/parameters/ConfigVersion'
+    post:
+      tags: [Model configs]
+      operationId: activateModelConfig
+      summary: Activate a config version (retires the previous one)
+      description: Refused with `400 validation_failed` if the version does not validate.
+      x-required-role: admin
+      security: *unsafe
+      responses:
+        '200':
+          description: Activated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelConfig'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/models/{model}/overrides:
+    parameters:
+      - $ref: '#/components/parameters/ModelKey'
+    post:
+      tags: [Runs]
+      operationId: createNodeOverride
+      summary: Pin a run node for a period
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NodeOverrideInput'}
+            example: {node_key: veto.equity.intl, as_of: '2026-10-31', value: true, reason: INR stress episode, valid_until: '2027-01-31'}
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeOverride'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/models/{model}/overrides/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ModelKey'
+      - $ref: '#/components/parameters/OverrideId'
+    delete:
+      tags: [Runs]
+      operationId: deleteNodeOverride
+      summary: Remove a node override (soft delete)
+      x-required-role: admin
+      security: *unsafe
+      responses:
+        '204': {description: Removed.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Runs
+  /v1/runs:
+    get:
+      tags: [Runs]
+      operationId: listRuns
+      summary: List model runs
+      x-required-role: viewer
+      parameters:
+        - {name: model, in: query, schema: {$ref: '#/components/schemas/Key'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/RunStatus'}}
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of runs, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: {type: array, items: {$ref: '#/components/schemas/Run'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/runs/compare:
+    get:
+      tags: [Runs]
+      operationId: compareRuns
+      summary: Compare two runs
+      x-required-role: viewer
+      parameters:
+        - {name: a, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: b, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Allocation moves and changed nodes.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunComparison'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/runs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [Runs]
+      operationId: getRun
+      summary: Get a run with its summary
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Run'}
+              example:
+                id: f04b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d
+                model: maaf
+                config_version: 1
+                as_of: '2026-10-31'
+                knowledge_cutoff: '2026-11-01T12:40:03Z'
+                params: {sectors_held: [sector.capgoods]}
+                status: draft
+                warnings: [{code: missing_score, series: 'metals.silver::industrial', used: 50}]
+                summary:
+                  l1:
+                    - {bucket: l1.equity, composite: 50.5, veto: false, tilt: 0.002, final: 0.545, neutral: 0.55}
+                    - {bucket: l1.debt, composite: 57.5, veto: false, tilt: 0.030, final: 0.356, neutral: 0.35}
+                    - {bucket: l1.metals, composite: 51.3, veto: false, tilt: 0.005, final: 0.099, neutral: 0.10}
+                  sector_qualifiers: [{sector: sector.capgoods, composite: 71.0}]
+                job_run_id: 8d2e6a1c-4b7f-4c1e-9a35-2f0b6c7d8e91
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/runs/{id}/values:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [Runs]
+      operationId: listRunValues
+      summary: Every node value a run produced
+      x-required-role: viewer
+      parameters:
+        - {name: step, in: query, schema: {type: string, enum: [composite, veto, tilt, sector_qualify, constraints, normalize, sleeve, rollup]}}
+        - {name: scorecard, in: query, schema: {type: string, pattern: '^[a-z][a-z0-9_]{0,31}$'}}
+      responses:
+        '200':
+          description: Node values.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/RunValue'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/runs/{id}/values/{node_key}/lineage:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+      - $ref: '#/components/parameters/NodeKey'
+    get:
+      tags: [Runs]
+      operationId: getRunValueLineage
+      summary: How one node was computed
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The node with its formula and inputs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeLineage'}
+              example:
+                node: tilt.equity.small
+                value: -0.101
+                step: tilt
+                formula: min((C-50)/50*cap, 0) because veto
+                inputs:
+                  nodes: {composite.equity.small: 33.3, veto.equity.small: true}
+                  params: {cap: 0.30}
+                  datapoints: [{id: 41920, series: trig.flow_froth.equity.small, value: true}]
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/runs/{id}/allocations:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [Runs]
+      operationId: getRunAllocations
+      summary: The run's allocation for a risk profile
+      x-required-role: viewer
+      parameters:
+        - {name: profile, in: query, schema: {$ref: '#/components/schemas/Key'}}
+      responses:
+        '200':
+          description: Allocation lines. Each group and the portfolio sum to exactly 1.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunAllocations'}
+              example:
+                run_id: f04b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d
+                profile: balanced
+                lines:
+                  - {line_item: equity.large, group: l1.equity, group_weight: '0.545000', within_group: '0.431000', portfolio_weight: '0.235000', neutral: '0.247500'}
+                  - {line_item: equity.mid, group: l1.equity, group_weight: '0.545000', within_group: '0.179000', portfolio_weight: '0.098000', neutral: '0.110000'}
+                  - {line_item: sector.capgoods, group: l1.equity, group_weight: '0.545000', within_group: '0.075000', portfolio_weight: '0.041000', neutral: '0.000000'}
+                  - {line_item: debt.gilt, group: l1.debt, group_weight: '0.356000', within_group: '0.260000', portfolio_weight: '0.093000', neutral: '0.087500'}
+                  - {line_item: metals.gold, group: l1.metals, group_weight: '0.099000', within_group: '0.745000', portfolio_weight: '0.074000', neutral: '0.075000'}
+                total: '1.000000'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/runs/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    post:
+      tags: [Runs]
+      operationId: approveRun
+      summary: Approve a draft run
+      x-required-role: analyst
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [note]
+              properties:
+                note: {type: string, minLength: 1, maxLength: 2000}
+            example: {note: Reviewed with Q3 notes; small-cap veto confirmed}
+      responses:
+        '200':
+          description: Approved.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Run'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/runs/{id}/publish:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    post:
+      tags: [Runs]
+      operationId: publishRun
+      summary: Publish an approved run (supersedes the previous one)
+      x-required-role: admin
+      security: *unsafe
+      responses:
+        '200':
+          description: Published.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Run'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/allocations/current:
+    get:
+      tags: [Runs]
+      operationId: getCurrentAllocation
+      summary: The published allocation for a model and profile
+      x-required-role: viewer
+      parameters:
+        - {name: model, in: query, required: true, schema: {$ref: '#/components/schemas/Key'}}
+        - {name: profile, in: query, required: true, schema: {$ref: '#/components/schemas/Key'}}
+      responses:
+        '200':
+          description: The current allocation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunAllocations'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Risk profiles, quality, audit
+  /v1/risk-profiles:
+    get:
+      tags: [Risk profiles]
+      operationId: listRiskProfiles
+      summary: List risk profiles (latest versions)
+      x-required-role: viewer
+      responses:
+        '200':
+          description: Profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/RiskProfile'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Risk profiles]
+      operationId: createRiskProfile
+      summary: Create a risk profile
+      description: Top-level weights, and each group's children, must sum to 1.
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RiskProfileInput'}
+            example:
+              key: balanced
+              name: Balanced
+              neutral_weights:
+                l1.equity: 0.55
+                l1.debt: 0.35
+                l1.metals: 0.10
+                equity.large: 0.45
+                equity.mid: 0.20
+                equity.small: 0.15
+                equity.intl: 0.20
+                debt.liquid: 0.40
+                debt.corporate: 0.35
+                debt.gilt: 0.25
+                metals.gold: 0.75
+                metals.silver: 0.25
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskProfile'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/risk-profiles/{key}:
+    parameters:
+      - $ref: '#/components/parameters/RiskProfileKey'
+    get:
+      tags: [Risk profiles]
+      operationId: getRiskProfile
+      summary: Get a risk profile (latest version)
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The profile.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskProfile'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+    patch:
+      tags: [Risk profiles]
+      operationId: updateRiskProfile
+      summary: Update a risk profile (creates a new version)
+      x-required-role: admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RiskProfilePatch'}
+      responses:
+        '200':
+          description: The new version.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskProfile'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/quality/report:
+    get:
+      tags: [Workspace]
+      operationId: getQualityReport
+      summary: Latest data-quality report
+      x-required-role: viewer
+      parameters:
+        - {name: as_of, in: query, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Stale, outlying, short-history and missing data.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QualityReport'}
+              example:
+                as_of: '2026-11-01'
+                stale: [{series: flows.small, last_obs: '2026-09-30', expected_by: '2026-10-14'}]
+                outliers: [{series: pe.smallcap250, obs_date: '2026-10-31', value: 48.2, z: 4.1}]
+                insufficient_history: [{series: pctile.180m.spread.small_large, obs: 3, min: 24}]
+                missing_scores: ['metals.silver::industrial']
+                bad_categories: []
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/audit:
+    get:
+      tags: [Audit]
+      operationId: listAudit
+      summary: Query the audit log
+      description: Entries are redacted at write time; secrets never appear in `before` or `after`.
+      x-required-role: admin
+      parameters:
+        - {name: entity, in: query, schema: {type: string, pattern: '^[a-z_]{1,64}$'}}
+        - {name: entity_id, in: query, schema: {type: string, maxLength: 128, pattern: '^[A-Za-z0-9_.:\-]{1,128}$'}}
+        - {name: actor, in: query, description: User UUID., schema: {type: string, format: uuid}}
+        - {name: since, in: query, schema: {type: string, format: date-time}}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of entries, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: {type: array, items: {$ref: '#/components/schemas/AuditRecord'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Portfolio (Overview)
+  /v1/portfolios/{portfolio}/allocation:
+    parameters:
+      - $ref: '#/components/parameters/PortfolioKey'
+    get:
+      tags: [Portfolio]
+      operationId: getPortfolioAllocation
+      summary: The allocation shown on Overview
+      x-required-role: viewer
+      parameters:
+        - name: version
+          in: query
+          description: '`published` (default), `draft`, or a version UUID.'
+          schema: {$ref: '#/components/schemas/VersionRef'}
+        - {name: compare, in: query, schema: {type: string, enum: [neutral, previous], default: neutral}}
+      responses:
+        '200':
+          description: Asset classes, sleeves, drivers and active vetoes.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PortfolioAllocation'}
+              example:
+                portfolio: core
+                version: {id: 7c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f, kind: published, as_of: '2026-10-28', published_at: '2026-10-28T05:26:00Z'}
+                asset_classes:
+                  - {node: l1.equity, weight: 0.5727, compare: 0.55, composite: 54.9}
+                  - {node: l1.debt, weight: 0.3355, compare: 0.35, composite: 34.7}
+                  - {node: l1.metals, weight: 0.0918, compare: 0.10, composite: 24.8}
+                sleeves:
+                  - {node: equity.large, group: l1.equity, weight: 0.254, within_group: 0.480, neutral: 0.224, delta: 0.0303, veto: false}
+                  - {node: equity.small, group: l1.equity, weight: 0.073, within_group: 0.139, neutral: 0.085, delta: -0.0113, veto: true}
+                  - {node: sector.banking, group: l1.equity, weight: 0.043, within_group: 0.075, neutral: 0.0, sleeve: true}
+                drivers:
+                  l1.equity: {valuation: 84.9, macro: 25.0, fundamentals: 55.0, flows: 73.8, momentum: 15.8, composite: 54.9}
+                vetoes: [{node: equity.small, source: override, note: Manually flagged}]
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Draft
+  /v1/draft:
+    get:
+      tags: [Draft]
+      operationId: getDraft
+      summary: The shared draft
+      x-required-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+      responses:
+        '200':
+          description: The draft with its revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Draft'}
+              example:
+                model: maaf
+                rev: 42
+                base_version: 7c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
+                changed_since_published: {scores: 15, vetoes: 0, parameters: 0}
+                config:
+                  signal_weights: {l1: {valuation: 0.30, macro: 0.20, fundamentals: 0.20, flows: 0.15, momentum: 0.15}}
+                  max_tilt: {l1: 0.20, equity: 0.30, debt: 0.30, metals: 0.25}
+                  normalisation: proportional
+                overrides: [{key: 'equity.large::margin_cycle', value: 50, reason: No feed, expires: '2027-01-31'}]
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+    patch:
+      tags: [Draft]
+      operationId: applyDraftEdits
+      summary: Apply edits to the shared draft
+      description: |
+        Scores and rubric answers become datapoints with source `override` or `analyst`;
+        parameters update the draft config. A stale `rev` returns `409 conflict` with the
+        current draft in `error.details[0].meta.current`.
+      x-required-role: analyst
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DraftPatch'}
+            example:
+              rev: 42
+              reason: Q4 review inputs
+              edits:
+                - {op: set_param, path: /max_tilt/l1, value: 0.15}
+                - {op: set_score, key: 'sector.capgoods::revisions', value: 70}
+      responses:
+        '200':
+          description: The updated draft with its new `rev`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Draft'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/draft/evaluate:
+    post:
+      tags: [Draft]
+      operationId: evaluateDraft
+      summary: Preview edits without writing anything
+      x-required-role: viewer
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DraftEvaluate'}
+            example:
+              rev: 42
+              edits:
+                - {op: set_param, path: /max_tilt/l1, value: 0.15}
+                - {op: set_score, key: 'sector.capgoods::revisions', value: 70}
+                - {op: set_rubric, key: 'l1.equity::macro', conditions: {rbi_stance: cutting, growth: in_line, inflation: falling}}
+      responses:
+        '200':
+          description: The previewed allocation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DraftPreview'}
+              example:
+                allocation: {l1.equity: 0.5690, l1.debt: 0.3390, l1.metals: 0.0920}
+                sleeves: {equity.large: 0.2531, sector.capgoods: 0.0}
+                diff_vs_saved: [{node: equity.large, from: 0.2545, to: 0.2531, delta: -0.0014}]
+                warnings: []
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/draft/reset:
+    post:
+      tags: [Draft]
+      operationId: resetDraft
+      summary: Drop unsaved edits
+      x-required-role: analyst
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+      responses:
+        '200':
+          description: The reset draft.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Draft'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/rubrics/{key}:
+    parameters:
+      - $ref: '#/components/parameters/RubricKey'
+    get:
+      tags: [Draft]
+      operationId: getRubric
+      summary: A rubric's conditions and current answer
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The rubric.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Rubric'}
+              example:
+                key: l1.equity::macro
+                base: 50
+                conditions:
+                  - id: rbi_stance
+                    label: RBI stance
+                    options:
+                      - {id: cutting, label: Cutting / about to cut, add: 20}
+                      - {id: hold, label: On hold, add: 0}
+                      - {id: hiking, label: Hiking / hawkish, add: -20}
+                  - id: growth
+                    label: Growth vs. expectations
+                    options: [{id: beat, add: 10}, {id: in_line, add: 0}, {id: miss, add: -10}]
+                  - id: inflation
+                    label: Inflation direction
+                    options: [{id: falling, add: 5}, {id: rising, add: -5}]
+                current: {score: 25.0, answered_at: '2026-08-01', stale_days: 92}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Draft]
+      operationId: answerRubric
+      summary: Record rubric answers (writes analyst datapoints)
+      x-required-role: analyst
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RubricAnswer'}
+            example: {obs_date: '2026-10-31', conditions: {rbi_stance: cutting, growth: in_line, inflation: falling}, note: Oct MPC}
+      responses:
+        '201':
+          description: Answers stored; the rubric with its new score.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Rubric'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Signals
+  /v1/signals:
+    get:
+      tags: [Signals]
+      operationId: listSignals
+      summary: Every signal's score, weight and contribution on the draft
+      description: Contribution = (score − 50) × weight, in composite points.
+      x-required-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+        - {name: node, in: query, schema: {$ref: '#/components/schemas/Key'}}
+      responses:
+        '200':
+          description: Contributions.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Signals'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/signals/attribution:
+    get:
+      tags: [Signals]
+      operationId: getSignalAttribution
+      summary: Draft vs the last saved review, per line item
+      description: Lines that moved less than 0.1pp are omitted.
+      x-required-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+      responses:
+        '200':
+          description: Allocation moves.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draft_rev, rows]
+                properties:
+                  draft_rev: {type: integer}
+                  baseline_version: {type: [string, 'null'], format: uuid}
+                  rows: {type: array, items: {$ref: '#/components/schemas/AllocationMove'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/signals/sensitivity:
+    get:
+      tags: [Signals]
+      operationId: getSignalSensitivity
+      summary: Largest line move when each score moves ±bump points
+      description: Cached per draft `rev`.
+      x-required-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 10}}
+        - {name: bump, in: query, schema: {type: number, minimum: 1, maximum: 50, default: 10}}
+      responses:
+        '200':
+          description: Signals ranked by impact.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Sensitivity'}
+              example: {draft_rev: 42, bump: 10, rows: [{key: 'sector.capgoods::valuation', impact_pp: 8.59}, {key: 'l1.equity::valuation', impact_pp: 0.57}]}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/signals/fragility:
+    post:
+      tags: [Signals]
+      operationId: computeFragility
+      summary: How far each rollup moves when signal weights move ±perturbation
+      description: Synchronous, about 200 evaluations; rate limited per user. Writes nothing.
+      x-required-role: viewer
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                perturbation: {type: number, minimum: 0.01, maximum: 0.5, default: 0.10}
+            example: {perturbation: 0.10}
+      responses:
+        '200':
+          description: Rollup ranges.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Fragility'}
+              example: {perturbation: 0.10, rollups: [{node: l1.equity, min: 0.561, max: 0.583, range_pp: 2.2}]}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Versions
+  /v1/versions:
+    get:
+      tags: [Versions]
+      operationId: listVersions
+      summary: Version history
+      x-required-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/PortfolioQuery'
+        - {name: kind, in: query, schema: {type: string, enum: [review, published]}}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of versions, newest first. Deleted versions are omitted.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: {type: array, items: {$ref: '#/components/schemas/VersionSummary'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Versions]
+      operationId: createVersion
+      summary: Save the draft as a review, or publish it
+      description: Publishing marks the previous published version `superseded`; Overview switches to the new one.
+      x-required-role: admin
+      x-required-role-note: '`kind: review` needs analyst; `kind: published` needs admin.'
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VersionCreate'}
+            example: {kind: published, label: Q4 review, reason: Quarterly sector review; capgoods enters sleeve}
+      responses:
+        '201':
+          description: Saved.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VersionCreated'}
+              example: {id: 9a40b1c2-d3e4-4f5a-8b6c-7d8e9f0a1b2c, kind: published, status: active, frozen_inputs: 15, superseded: 7c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/versions/compare:
+    get:
+      tags: [Versions]
+      operationId: compareVersions
+      summary: Compare any two of draft, a version, published, neutral
+      x-required-role: viewer
+      parameters:
+        - {name: a, in: query, required: true, schema: {$ref: '#/components/schemas/CompareRef'}}
+        - {name: b, in: query, required: true, schema: {$ref: '#/components/schemas/CompareRef'}}
+      responses:
+        '200':
+          description: Changed inputs and allocation moves.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Comparison'}
+              example:
+                totals: {changes: 15, scores: 15, vetoes: 0, parameters: 0}
+                allocation_moves: [{node: equity.large, from: 0.2544, to: 0.2545, delta: 0.0001}]
+                inputs: [{key: 'equity.large::relvalue', kind: score, source: auto, from: 59.7, to: 59.9}]
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/versions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/VersionId'
+    get:
+      tags: [Versions]
+      operationId: getVersion
+      summary: Reopen a version exactly as held
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The frozen version.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Version'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+    delete:
+      tags: [Versions]
+      operationId: deleteVersion
+      summary: Soft-delete a version
+      description: The active published version cannot be deleted (`409 conflict`).
+      x-required-role: admin
+      security: *unsafe
+      responses:
+        '204': {description: Deleted.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/versions/{id}/publish:
+    parameters:
+      - $ref: '#/components/parameters/VersionId'
+    post:
+      tags: [Versions]
+      operationId: publishVersion
+      summary: Publish a saved review
+      x-required-role: admin
+      security: *unsafe
+      responses:
+        '200':
+          description: Published.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VersionCreated'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/versions/{id}/revert:
+    parameters:
+      - $ref: '#/components/parameters/VersionId'
+    post:
+      tags: [Versions]
+      operationId: revertToVersion
+      summary: Restore a version into the draft
+      description: |
+        `manual_and_params` (default) restores the version's config, rubric answers and
+        overrides while auto-fetched scores stay live; `all` also pins every auto-fetched
+        score to the version's value as an override with expiry.
+      x-required-role: analyst
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                mode: {type: string, enum: [manual_and_params, all], default: manual_and_params}
+                rev: {type: integer, minimum: 1, description: Expected draft revision; a stale value returns 409.}
+            example: {mode: manual_and_params}
+      responses:
+        '200':
+          description: The new draft revision and what changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rev, compare]
+                properties:
+                  rev: {type: integer}
+                  compare: {$ref: '#/components/schemas/Comparison'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Backtests
+  /v1/funds/search:
+    get:
+      tags: [Backtests]
+      operationId: searchFunds
+      summary: Search mutual fund schemes
+      x-required-role: viewer
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, minLength: 3, maxLength: 100}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Matching funds.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Fund'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/benchmarks:
+    get:
+      tags: [Backtests]
+      operationId: listBenchmarks
+      summary: Indices a backtest can compare against
+      x-required-role: viewer
+      responses:
+        '200':
+          description: Benchmarks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, name]
+                      properties:
+                        key: {$ref: '#/components/schemas/Key'}
+                        name: {type: string}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/backtests:
+    get:
+      tags: [Backtests]
+      operationId: listBacktests
+      summary: Backtest history
+      x-required-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of backtests, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: {type: array, items: {$ref: '#/components/schemas/Backtest'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Backtests]
+      operationId: submitBacktest
+      summary: Submit a backtest
+      description: At most 3 backtests may be queued or running; a 4th returns `409 queue_full`.
+      x-required-role: analyst
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BacktestRequest'}
+            example:
+              name: Current allocation, 5y
+              source: {kind: draft}
+              benchmark: midcap150
+              total_amount: 100000
+              purchase_date: '2021-11-01'
+              legs:
+                - {sleeve: equity.large, scheme_code: '120586', amount: 25440}
+                - {sleeve: debt.liquid, scheme_code: '119800', amount: 13180}
+      responses:
+        '202':
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [backtest, job_run]
+                properties:
+                  backtest: {$ref: '#/components/schemas/Backtest'}
+                  job_run: {$ref: '#/components/schemas/JobRun'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/backtests/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BacktestId'
+    get:
+      tags: [Backtests]
+      operationId: getBacktest
+      summary: Get a backtest
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The backtest; `summary` is set once completed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Backtest'}
+              example:
+                id: 245b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d
+                status: completed
+                benchmark: midcap150
+                summary:
+                  current: {allocation: 166136, benchmark: 198483, difference: -32347}
+                  abs_return: {allocation: 0.6613, benchmark: 0.9848, difference: -0.3235}
+                  xirr: {allocation: 0.1116, benchmark: 0.1519, difference: -0.0403}
+                series_url: /v1/backtests/245b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d/series?range=ALL
+                per_fund: [{sleeve: equity.large, scheme_code: '120586', invested: 25440, current: 44120, xirr: 0.118}]
+                warnings: []
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/backtests/{id}/series:
+    parameters:
+      - $ref: '#/components/parameters/BacktestId'
+    get:
+      tags: [Backtests]
+      operationId: getBacktestSeries
+      summary: Daily value series of a completed backtest
+      x-required-role: viewer
+      parameters:
+        - {name: range, in: query, schema: {type: string, enum: [1M, 6M, 1Y, 3Y, 5Y, ALL], default: ALL}}
+      responses:
+        '200':
+          description: Points, oldest first.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BacktestSeries'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/backtests/{id}/rerun:
+    parameters:
+      - $ref: '#/components/parameters/BacktestId'
+    post:
+      tags: [Backtests]
+      operationId: rerunBacktest
+      summary: Re-run with the same inputs and fresh data
+      x-required-role: analyst
+      security: *unsafe
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Queued as a new backtest with `rerun_of` set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [backtest, job_run]
+                properties:
+                  backtest: {$ref: '#/components/schemas/Backtest'}
+                  job_run: {$ref: '#/components/schemas/JobRun'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Notes, search, cadence
+  /v1/notes:
+    get:
+      tags: [Notes]
+      operationId: listNotes
+      summary: List notes, optionally those referencing a key
+      x-required-role: viewer
+      parameters:
+        - {name: ref_kind, in: query, schema: {$ref: '#/components/schemas/NoteRefKind'}}
+        - {name: ref_key, in: query, schema: {type: string, maxLength: 160, pattern: '^[A-Za-z0-9_.:\-]{1,160}$'}}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of notes, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: {type: array, items: {$ref: '#/components/schemas/Note'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+    post:
+      tags: [Notes]
+      operationId: createNote
+      summary: Create a note
+      description: '`[[equity.large::valuation]]` in `body_md` becomes a reference.'
+      x-required-role: analyst
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NoteInput'}
+            example: {title: Q4 valuation view, body_md: 'Large cap looks rich: see [[equity.large::valuation]].'}
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Note'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/notes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/NoteId'
+    get:
+      tags: [Notes]
+      operationId: getNote
+      summary: Get a note
+      x-required-role: viewer
+      responses:
+        '200':
+          description: The note.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Note'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+    patch:
+      tags: [Notes]
+      operationId: updateNote
+      summary: Update a note (author or admin)
+      x-required-role: analyst
+      x-required-role-note: author of the note, or admin
+      security: *unsafe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NotePatch'}
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Note'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '500': {$ref: '#/components/responses/Internal'}
+    delete:
+      tags: [Notes]
+      operationId: deleteNote
+      summary: Delete a note (author or admin; soft delete)
+      x-required-role: analyst
+      x-required-role-note: author of the note, or admin
+      security: *unsafe
+      responses:
+        '204': {description: Deleted.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/search:
+    get:
+      tags: [Workspace]
+      operationId: search
+      summary: Search series, nodes, parameters and notes (⌘K)
+      x-required-role: viewer
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, minLength: 2, maxLength: 100}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Hits, best first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/SearchHit'}}
+              example:
+                data:
+                  - {kind: series, key: 'l1.equity::valuation', title: Equity - Valuation}
+                  - {kind: note, key: 3f2a9c1e-5b7d-4e8a-9c21-7d4e5f6a8b90, title: Q4 valuation view, snippet: Large cap looks rich}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/Internal'}
+  /v1/cadence:
+    get:
+      tags: [Workspace]
+      operationId: getCadence
+      summary: Review rhythms and how long until each is due
+      x-required-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/ModelQuery'
+      responses:
+        '200':
+          description: Rhythms.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/CadenceRhythm'}}
+              example:
+                data:
+                  - {rhythm: quarterly, every_days: 91, last_entry: '2026-09-30', days_remaining: 60}
+                  - {rhythm: semiannual, every_days: 182, last_entry: '2026-06-30', days_remaining: 60}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/Internal'}
+
+  # ---------------------------------------------------------------- Health
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: healthz
+      summary: Liveness
+      security: []
+      responses:
+        '200':
+          description: The process is up.
+          content:
+            text/plain:
+              schema: {type: string, const: "ok\n"}
+        '405':
+          description: Only GET is allowed.
+        '503':
+          description: Not healthy.
+          content:
+            text/plain:
+              schema: {type: string}
+  /readyz:
+    get:
+      tags: [Health]
+      operationId: readyz
+      summary: Readiness (database reachable)
+      description: Returns no detail about dependencies beyond ok/unavailable.
+      security: []
+      responses:
+        '200':
+          description: Ready.
+          content:
+            text/plain:
+              schema: {type: string, const: "ok\n"}
+        '405':
+          description: Only GET is allowed.
+        '503':
+          description: Not ready.
+          content:
+            text/plain:
+              schema: {type: string, const: "unavailable\n"}
+  /metrics:
+    servers:
+      - url: http://127.0.0.1:9090
+        description: Internal metrics listener (`METRICS_ADDR`). Bound to a private interface, never exposed through the public load balancer.
+    get:
+      tags: [Health]
+      operationId: metrics
+      summary: Prometheus metrics (internal listener only)
+      x-internal: true
+      security: []
+      responses:
+        '200':
+          description: Prometheus text exposition. Contains no user data.
+          content:
+            text/plain:
+              schema: {type: string}
+        '404':
+          description: Not served on the public listener.
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: core_session
+      description: |
+        Opaque 256-bit session token set by `POST /v1/auth/login` with
+        `HttpOnly; Secure; SameSite=Strict; Path=/`. Stored server-side only as a SHA-256 hash.
+        Idle and absolute expiry apply; the token is rotated on login.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: |
+        Required on unsafe methods (POST, PATCH, PUT, DELETE) when authenticating by cookie.
+        The value is the `core_csrf` cookie set at login (bound to the session; checked in
+        constant time). Not needed with `bearerApiKey`.
+    bearerApiKey:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer <api_key>`. Keys are created by an admin, shown once, stored only as
+        a SHA-256 hash, and can expire or be revoked.
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Page size.
+      schema: {type: integer, minimum: 1, maximum: 500, default: 50}
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque, signed cursor from `next_cursor`.
+      schema: {type: string, maxLength: 512, pattern: '^[A-Za-z0-9_\-]{1,512}$'}
+    Cutoff:
+      name: cutoff
+      in: query
+      description: Knowledge cutoff for point-in-time reads. Default now.
+      schema: {type: string, format: date-time}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: Makes a POST that creates work safe to retry. Keys expire after 24 h.
+      schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:\-]{1,128}$'}
+    SeriesKey:
+      name: key
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Key'}
+    EntityKey:
+      name: key
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Key'}
+    SourceKey:
+      name: key
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Key'}
+    RiskProfileKey:
+      name: key
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Key'}
+    RubricKey:
+      name: key
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Key'}
+    ModelKey:
+      name: model
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Key'}
+    ModelQuery:
+      name: model
+      in: query
+      description: Model key. Default `maaf`.
+      schema: {allOf: [{$ref: '#/components/schemas/Key'}], default: maaf}
+    PortfolioKey:
+      name: portfolio
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Key'}
+    PortfolioQuery:
+      name: portfolio
+      in: query
+      description: Portfolio key. Default `core`.
+      schema: {allOf: [{$ref: '#/components/schemas/Key'}], default: core}
+    NodeKey:
+      name: node_key
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Key'}
+    ConfigVersion:
+      name: version
+      in: path
+      required: true
+      description: A version number, or `active`.
+      schema: {type: string, pattern: '^([1-9][0-9]{0,5}|active)$'}
+    ObsDate:
+      name: obs_date
+      in: path
+      required: true
+      schema: {type: string, format: date}
+    DatapointId:
+      name: id
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
+    JobId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ScheduleId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    OverrideId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    VersionId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    BacktestId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    NoteId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+
+  headers:
+    RetryAfter:
+      description: Seconds until the request may be retried.
+      schema: {type: integer, minimum: 1}
+
+  responses:
+    BadRequest:
+      description: '`validation_failed`, `invalid_params` or `not_user_triggerable`: the request is malformed or invalid.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example:
+            error:
+              code: validation_failed
+              message: 2 of 3 points rejected
+              details: [{index: 1, field: value, reason: out_of_range, meta: {min: 0, max: 100}}]
+              request_id: req_7f3a9b2c1d4e
+    Unauthorized:
+      description: '`unauthorized`: missing, invalid or expired credentials. Login failures always return this, whatever the cause.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: unauthorized, message: Invalid email or password, request_id: req_7f3a9b2c1d4e}}
+    Forbidden:
+      description: '`forbidden`: role too low, CSRF token missing or wrong, or origin not allowed.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: forbidden, message: Requires role admin, request_id: req_7f3a9b2c1d4e}}
+    NotFound:
+      description: '`not_found`.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: '`conflict` (stale revision, cycle, duplicate, invalid state), `queue_full` or `not_available`.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: conflict, message: Draft revision is stale, request_id: req_7f3a9b2c1d4e}}
+    PayloadTooLarge:
+      description: '`payload_too_large`.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    UnsupportedMedia:
+      description: '`unsupported_media_type`: only CSV and XLSX are accepted.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unprocessable:
+      description: '`idempotency_mismatch`: the Idempotency-Key was used with a different request.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    TooManyRequests:
+      description: '`rate_limited`.'
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Internal:
+      description: '`internal`. The message is generic; details are in server logs under `request_id`.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    JobAccepted:
+      description: Work queued.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [job_run]
+            properties:
+              job_run: {$ref: '#/components/schemas/JobRun'}
+          example:
+            job_run:
+              id: 8d2e6a1c-4b7f-4c1e-9a35-2f0b6c7d8e91
+              kind: model.run
+              status: queued
+              trigger: user
+              queue: model
+              progress: 0
+              queued_at: '2026-11-01T12:40:02Z'
+              links: {self: /v1/jobs/8d2e6a1c-4b7f-4c1e-9a35-2f0b6c7d8e91, events: /v1/jobs/8d2e6a1c-4b7f-4c1e-9a35-2f0b6c7d8e91/events}
+
+  schemas:
+    # ------------------------------------------------------------ primitives
+    Key:
+      description: Lowercase dotted identifier, optionally with a `::signal` suffix (CORE keys), e.g. `equity.large`, `equity.large::relvalue`.
+      type: string
+      maxLength: 191
+      pattern: '^[a-z0-9][a-z0-9_.\-]{0,126}(::[a-z0-9][a-z0-9_\-]{0,62})?$'
+    KeyPattern:
+      description: A key, or a key prefix ending in `*`.
+      type: string
+      maxLength: 192
+      pattern: '^[a-z0-9][a-z0-9_.:\-]{0,190}\*?$'
+    Value:
+      description: Typed by the series. Null when there is no value.
+      type: [number, boolean, string, 'null']
+      maxLength: 64
+    ValueInput:
+      description: A number, a boolean, or an allowed category.
+      type: [number, boolean, string]
+      maxLength: 64
+    Decimal:
+      description: An exact decimal as a string (weights sum exactly to 1).
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]{1,6})?$'
+    Note:
+      type: object
+      required: [id, title, body_md, author, refs, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        body_md: {type: string, description: 'Markdown as written. Render with a sanitising renderer; never as raw HTML.'}
+        author: {$ref: '#/components/schemas/UserRef'}
+        refs:
+          type: array
+          items:
+            type: object
+            required: [kind, key]
+            properties:
+              kind: {$ref: '#/components/schemas/NoteRefKind'}
+              key: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    NoteRefKind:
+      type: string
+      enum: [series, node, parameter, version, backtest]
+    NoteInput:
+      type: object
+      additionalProperties: false
+      required: [title, body_md]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        body_md: {type: string, minLength: 1, maxLength: 100000}
+    NotePatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        body_md: {type: string, minLength: 1, maxLength: 100000}
+
+    # ------------------------------------------------------------ errors and paging
+    ErrorCode:
+      type: string
+      enum: [unauthorized, forbidden, not_found, validation_failed, conflict, idempotency_mismatch, invalid_params, not_user_triggerable, rate_limited, queue_full, not_available, payload_too_large, unsupported_media_type, internal]
+    Detail:
+      type: object
+      required: [reason]
+      properties:
+        index: {type: integer, minimum: 0, description: Position of the offending item in the request.}
+        path: {type: string, description: 'JSON pointer, e.g. `/scorecards/equity/signals`.'}
+        field: {type: string}
+        reason: {type: string, description: 'Machine-readable, e.g. `out_of_range`, `weights_sum`, `unknown_series`.'}
+        meta: {type: object, description: 'Context, e.g. `{"min": 0, "max": 100}` or `{"got": 0.95}`.'}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: {$ref: '#/components/schemas/ErrorCode'}
+            message: {type: string, description: 'Safe to show users. Never contains stack traces, SQL or secrets.'}
+            details: {type: array, items: {$ref: '#/components/schemas/Detail'}}
+            request_id: {type: string}
+    PageMeta:
+      type: object
+      required: [next_cursor]
+      properties:
+        next_cursor: {type: [string, 'null'], description: Pass as `cursor` for the next page; null on the last page.}
+
+    # ------------------------------------------------------------ auth
+    Role:
+      type: string
+      enum: [viewer, analyst, admin]
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: {type: string, format: email, minLength: 3, maxLength: 254}
+        password: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+    User:
+      type: object
+      required: [id, email, name, role]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        name: {type: string}
+        role: {$ref: '#/components/schemas/Role'}
+    UserRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+    LoginResponse:
+      type: object
+      required: [user]
+      properties:
+        user: {$ref: '#/components/schemas/User'}
+
+    # ------------------------------------------------------------ catalog
+    EntityKind:
+      type: string
+      enum: [asset_class, segment, bucket, metal, sector, index, macro]
+    Entity:
+      type: object
+      required: [key, kind, name, active]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        kind: {$ref: '#/components/schemas/EntityKind'}
+        name: {type: string}
+        parent: {anyOf: [{$ref: '#/components/schemas/Key'}, {type: 'null'}]}
+        meta: {type: object}
+        active: {type: boolean}
+    EntityInput:
+      type: object
+      additionalProperties: false
+      required: [key, kind, name]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        kind: {$ref: '#/components/schemas/EntityKind'}
+        name: {type: string, minLength: 1, maxLength: 200}
+        parent: {$ref: '#/components/schemas/Key'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    EntityPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        parent: {anyOf: [{$ref: '#/components/schemas/Key'}, {type: 'null'}]}
+        meta: {$ref: '#/components/schemas/Meta'}
+        active: {type: boolean}
+    Meta:
+      description: Free-form metadata, bounded.
+      type: object
+      maxProperties: 50
+      propertyNames: {pattern: '^[a-z][a-z0-9_]{0,63}$'}
+    Source:
+      type: object
+      required: [key, kind, name, active]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        kind: {type: string, enum: [external_api, file_import, analyst, override, computed]}
+        name: {type: string}
+        active: {type: boolean}
+        connector_available: {type: boolean, description: Whether a fetch connector is built for this source.}
+    Layer:
+      type: string
+      enum: [raw, judgment, derived, window, percentile, score, trigger, veto]
+    ValueType:
+      type: string
+      enum: [num, bool, cat]
+    Frequency:
+      type: string
+      enum: [daily, weekly, monthly, quarterly, event]
+    RegistryGroup:
+      type: string
+      enum: [equity, debt, metals, governance, veto]
+    Validation:
+      type: object
+      additionalProperties: false
+      properties:
+        min: {type: number}
+        max: {type: number}
+    Derivation:
+      type: object
+      additionalProperties: false
+      required: [fn, inputs]
+      properties:
+        fn: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        inputs:
+          type: object
+          maxProperties: 32
+          propertyNames: {pattern: '^[a-z][a-z0-9_]{0,31}$'}
+          additionalProperties: {$ref: '#/components/schemas/Key'}
+        params:
+          type: object
+          maxProperties: 50
+          description: Primitive-specific; validated by the primitive. An `expr` formula is at most 500 characters and runs sandboxed.
+        version: {type: integer, minimum: 1, readOnly: true}
+    RegistryMetaInput:
+      type: object
+      additionalProperties: false
+      properties:
+        display_name: {type: string, maxLength: 200}
+        node: {$ref: '#/components/schemas/Key'}
+        signal: {$ref: '#/components/schemas/Key'}
+        group: {$ref: '#/components/schemas/RegistryGroup'}
+        update_type: {type: string, enum: [derived, rubric, analyst, constant, governance, veto, raw]}
+        owner: {type: string, maxLength: 64}
+        stale_after: {type: string, pattern: '^[0-9]{1,4}(h|d)$'}
+        flags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [mock, constant, default]}}
+    SeriesFields:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        entity: {$ref: '#/components/schemas/Key'}
+        unit: {type: string, maxLength: 32}
+        frequency: {$ref: '#/components/schemas/Frequency'}
+        align: {type: string, enum: [last, month_end, mean]}
+        allowed_values: {type: array, minItems: 2, maxItems: 50, uniqueItems: true, items: {type: string, pattern: '^[a-z0-9_]{1,64}$'}}
+        validation: {$ref: '#/components/schemas/Validation'}
+        derivation: {$ref: '#/components/schemas/Derivation'}
+        min_history: {type: integer, minimum: 1, maximum: 10000}
+        source_priority: {type: array, minItems: 1, maxItems: 20, uniqueItems: true, items: {$ref: '#/components/schemas/Key'}}
+        tags: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, pattern: '^[a-z0-9_]{1,32}$'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+        registry: {$ref: '#/components/schemas/RegistryMetaInput'}
+    SeriesInput:
+      allOf:
+        - $ref: '#/components/schemas/SeriesFields'
+        - type: object
+          required: [key, name, layer, value_type, frequency]
+          properties:
+            key: {$ref: '#/components/schemas/Key'}
+            layer: {$ref: '#/components/schemas/Layer'}
+            value_type: {$ref: '#/components/schemas/ValueType'}
+      unevaluatedProperties: false
+    SeriesPatch:
+      allOf:
+        - $ref: '#/components/schemas/SeriesFields'
+        - type: object
+          properties:
+            active: {type: boolean}
+      minProperties: 1
+      unevaluatedProperties: false
+    Series:
+      type: object
+      required: [key, name, layer, value_type, frequency, source_priority, active]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        name: {type: string}
+        entity: {type: [string, 'null']}
+        layer: {$ref: '#/components/schemas/Layer'}
+        value_type: {$ref: '#/components/schemas/ValueType'}
+        unit: {type: [string, 'null']}
+        frequency: {$ref: '#/components/schemas/Frequency'}
+        align: {type: string}
+        allowed_values: {type: [array, 'null'], items: {type: string}}
+        validation: {$ref: '#/components/schemas/Validation'}
+        derivation: {anyOf: [{$ref: '#/components/schemas/Derivation'}, {type: 'null'}]}
+        derivation_ver: {type: [integer, 'null']}
+        min_history: {type: [integer, 'null']}
+        source_priority: {type: array, items: {type: string}}
+        tags: {type: array, items: {type: string}}
+        registry: {type: object}
+        active: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    SeriesSaved:
+      type: object
+      required: [key, layer]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        layer: {$ref: '#/components/schemas/Layer'}
+        derivation_ver: {type: [integer, 'null']}
+        deps: {type: array, items: {$ref: '#/components/schemas/Key'}}
+        rebuild_job: {anyOf: [{$ref: '#/components/schemas/JobRef'}, {type: 'null'}]}
+    DepEdge:
+      type: object
+      required: [series, depends_on, depth]
+      properties:
+        series: {$ref: '#/components/schemas/Key'}
+        depends_on: {$ref: '#/components/schemas/Key'}
+        depth: {type: integer, minimum: 1}
+
+    # ------------------------------------------------------------ datapoints
+    PointInput:
+      type: object
+      additionalProperties: false
+      required: [series, obs_date, value]
+      properties:
+        series: {$ref: '#/components/schemas/Key'}
+        obs_date: {type: string, format: date}
+        value: {$ref: '#/components/schemas/ValueInput'}
+        note: {type: string, maxLength: 2000}
+    DatapointWrite:
+      type: object
+      additionalProperties: false
+      required: [source, points]
+      properties:
+        source: {type: string, enum: [analyst, override]}
+        points: {type: array, minItems: 1, maxItems: 1000, items: {$ref: '#/components/schemas/PointInput'}}
+    Rejection:
+      type: object
+      required: [index, series, reason]
+      properties:
+        index: {type: integer, minimum: 0}
+        series: {type: string}
+        reason: {type: string, enum: [unknown_series, wrong_type, out_of_range, not_allowed, inactive_series, not_writable]}
+        message: {type: string}
+    WriteResult:
+      type: object
+      required: [batch_id, written, skipped, rejected]
+      properties:
+        batch_id: {type: string, format: uuid}
+        written: {type: integer, minimum: 0}
+        skipped: {type: integer, minimum: 0}
+        rejected: {type: array, items: {$ref: '#/components/schemas/Rejection'}}
+        cascade_job: {anyOf: [{$ref: '#/components/schemas/JobRef'}, {type: 'null'}]}
+    ResolvedPoint:
+      type: object
+      required: [obs_date, value]
+      properties:
+        id: {type: [integer, 'null'], format: int64}
+        obs_date: {type: string, format: date}
+        value: {$ref: '#/components/schemas/Value'}
+        source: {type: [string, 'null']}
+        known_at: {type: [string, 'null'], format: date-time}
+        derivation_ver: {type: [integer, 'null']}
+        reason: {type: string, enum: [not_known_at_cutoff, no_value], description: Set when value is null.}
+    SeriesDatapoints:
+      type: object
+      required: [series, cutoff, data]
+      properties:
+        series: {$ref: '#/components/schemas/Key'}
+        cutoff: {type: string, format: date-time}
+        data: {type: array, items: {$ref: '#/components/schemas/ResolvedPoint'}}
+    DatapointVersion:
+      type: object
+      required: [id, value, source, known_at, status]
+      properties:
+        id: {type: integer, format: int64}
+        value: {$ref: '#/components/schemas/Value'}
+        source: {type: string}
+        known_at: {type: string, format: date-time}
+        actor: {type: string, format: email, description: Present for analyst and override rows.}
+        note: {type: string}
+        status: {type: string, enum: [active, retracted]}
+        supersedes_id: {type: [integer, 'null'], format: int64}
+    DatapointVersions:
+      type: object
+      required: [resolved_id, versions]
+      properties:
+        resolved_id: {type: [integer, 'null'], format: int64}
+        versions: {type: array, items: {$ref: '#/components/schemas/DatapointVersion'}}
+    Lineage:
+      type: object
+      required: [id, series, value]
+      properties:
+        id: {type: integer, format: int64}
+        series: {$ref: '#/components/schemas/Key'}
+        obs_date: {type: string, format: date}
+        value: {$ref: '#/components/schemas/Value'}
+        derivation:
+          type: object
+          properties:
+            fn: {type: string}
+            version: {type: integer}
+        inputs: {type: array, items: {$ref: '#/components/schemas/Lineage'}}
+    RetractRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 2000}
+    SnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [as_of, series]
+      properties:
+        as_of: {type: string, format: date}
+        cutoff: {type: string, format: date-time}
+        series: {type: array, minItems: 1, maxItems: 500, uniqueItems: true, items: {$ref: '#/components/schemas/KeyPattern'}}
+    SnapshotValue:
+      type: object
+      required: [value, datapoint_id, source]
+      properties:
+        value: {$ref: '#/components/schemas/Value'}
+        datapoint_id: {type: integer, format: int64}
+        source: {type: string}
+    Snapshot:
+      type: object
+      required: [as_of, values, missing]
+      properties:
+        as_of: {type: string, format: date}
+        values:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/SnapshotValue'}
+        missing: {type: array, items: {type: string}}
+
+    # ------------------------------------------------------------ imports
+    Upload:
+      type: object
+      required: [id, filename, content_type, bytes, sha256, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        filename: {type: string, description: Sanitised display name.}
+        content_type: {type: string, enum: [text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet]}
+        bytes: {type: integer, minimum: 1}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: [string, 'null'], format: date-time}
+    ImportMappingInput:
+      type: object
+      additionalProperties: false
+      required: [name, header_row_match, date_column, columns, known_at]
+      properties:
+        key: {allOf: [{$ref: '#/components/schemas/Key'}], description: Stable id used as `mapping_id`. Derived from `name` when omitted.}
+        name: {type: string, minLength: 1, maxLength: 200}
+        sheet: {type: string, maxLength: 100, description: XLSX only.}
+        header_row_match: {type: string, minLength: 1, maxLength: 100}
+        date_column:
+          type: object
+          additionalProperties: false
+          required: [name, format]
+          properties:
+            name: {type: string, minLength: 1, maxLength: 100}
+            format: {type: string, minLength: 1, maxLength: 32, description: 'Go time layout, e.g. `Jan-2006`.'}
+            obs_date: {type: string, enum: ['', month_end]}
+        columns:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, series]
+            properties:
+              name: {type: string, minLength: 1, maxLength: 200}
+              series: {$ref: '#/components/schemas/Key'}
+        ignore_columns: {type: array, maxItems: 500, items: {type: string, maxLength: 200}}
+        known_at: {type: string, pattern: '^(now|obs_date_plus_days:[0-9]{1,3})$'}
+    ImportMapping:
+      allOf:
+        - $ref: '#/components/schemas/ImportMappingInput'
+        - type: object
+          required: [key, version, created_at]
+          properties:
+            version: {type: integer, minimum: 1}
+            created_by: {$ref: '#/components/schemas/UserRef'}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+
+    # ------------------------------------------------------------ jobs
+    JobStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, cancelled, skipped]
+    JobTrigger:
+      type: string
+      enum: [schedule, event, user, chain, system]
+    JobRef:
+      type: object
+      required: [id, kind, status]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {$ref: '#/components/schemas/Key'}
+        status: {$ref: '#/components/schemas/JobStatus'}
+        args: {type: object}
+    JobRun:
+      type: object
+      required: [id, kind, status, trigger, queue, progress, queued_at]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {$ref: '#/components/schemas/Key'}
+        args: {type: object}
+        status: {$ref: '#/components/schemas/JobStatus'}
+        trigger: {$ref: '#/components/schemas/JobTrigger'}
+        queue: {type: string}
+        user: {type: [string, 'null'], format: email, description: Who started a user-triggered run.}
+        attempt: {type: integer, minimum: 0}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        message: {type: [string, 'null']}
+        result: {type: [object, 'null']}
+        error:
+          type: [object, 'null']
+          description: Safe summary; never a stack trace.
+          properties:
+            code: {type: string}
+            message: {type: string}
+            retryable: {type: boolean}
+        cancel_requested: {type: boolean}
+        parent_id: {type: [string, 'null'], format: uuid}
+        root_id: {type: [string, 'null'], format: uuid}
+        queued_at: {type: string, format: date-time}
+        started_at: {type: [string, 'null'], format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+        links:
+          type: object
+          properties:
+            self: {type: string}
+            events: {type: string}
+    JobTree:
+      type: object
+      required: [id, kind, trigger, status, children]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {$ref: '#/components/schemas/Key'}
+        trigger: {$ref: '#/components/schemas/JobTrigger'}
+        status: {$ref: '#/components/schemas/JobStatus'}
+        result: {type: [object, 'null']}
+        children: {type: array, items: {$ref: '#/components/schemas/JobTree'}}
+    JobKind:
+      type: object
+      required: [kind, queue, user_triggerable, roles, args_version, args_schema]
+      properties:
+        kind: {$ref: '#/components/schemas/Key'}
+        queue: {type: string}
+        user_triggerable: {type: boolean}
+        roles: {type: array, items: {$ref: '#/components/schemas/Role'}}
+        args_version: {type: integer, minimum: 1}
+        args_schema: {type: object, description: JSON Schema of the kind's args.}
+    JobSubmit:
+      oneOf:
+        - $ref: '#/components/schemas/SubmitImportFile'
+        - $ref: '#/components/schemas/SubmitDeriveCascade'
+        - $ref: '#/components/schemas/SubmitVetoEvaluate'
+        - $ref: '#/components/schemas/SubmitModelRun'
+        - $ref: '#/components/schemas/SubmitQualityCheck'
+      discriminator:
+        propertyName: kind
+        mapping:
+          import.file: '#/components/schemas/SubmitImportFile'
+          derive.cascade: '#/components/schemas/SubmitDeriveCascade'
+          veto.evaluate: '#/components/schemas/SubmitVetoEvaluate'
+          model.run: '#/components/schemas/SubmitModelRun'
+          quality.check: '#/components/schemas/SubmitQualityCheck'
+    SubmitImportFile:
+      type: object
+      additionalProperties: false
+      required: [kind, args]
+      properties:
+        kind: {type: string, const: import.file}
+        args:
+          type: object
+          additionalProperties: false
+          required: [upload_id, mapping_id]
+          properties:
+            upload_id: {type: string, format: uuid}
+            mapping_id: {$ref: '#/components/schemas/Key'}
+            dry_run: {type: boolean, default: false}
+    SubmitDeriveCascade:
+      type: object
+      additionalProperties: false
+      required: [kind, args]
+      properties:
+        kind: {type: string, const: derive.cascade}
+        args:
+          description: Users may only start rebuilds (admin); incremental cascades are event-triggered.
+          type: object
+          additionalProperties: false
+          required: [mode, series]
+          properties:
+            mode: {type: string, const: rebuild}
+            series: {type: array, minItems: 1, maxItems: 500, uniqueItems: true, items: {$ref: '#/components/schemas/KeyPattern'}}
+            include_downstream: {type: boolean, default: true}
+    SubmitVetoEvaluate:
+      type: object
+      additionalProperties: false
+      required: [kind, args]
+      properties:
+        kind: {type: string, const: veto.evaluate}
+        args:
+          type: object
+          additionalProperties: false
+          required: [as_of]
+          properties:
+            as_of: {type: string, format: date}
+    SubmitModelRun:
+      type: object
+      additionalProperties: false
+      required: [kind, args]
+      properties:
+        kind: {type: string, const: model.run}
+        args:
+          type: object
+          additionalProperties: false
+          required: [model, as_of]
+          properties:
+            model: {$ref: '#/components/schemas/Key'}
+            as_of: {type: string, format: date}
+            cutoff: {type: string, format: date-time}
+            config_version:
+              description: A version number, or `active`.
+              oneOf:
+                - {type: integer, minimum: 1}
+                - {type: string, const: active}
+            params: {$ref: '#/components/schemas/RunParams'}
+            publish: {type: boolean, default: false, description: '`true` requires admin.'}
+    SubmitQualityCheck:
+      type: object
+      additionalProperties: false
+      required: [kind, args]
+      properties:
+        kind: {type: string, const: quality.check}
+        args:
+          type: object
+          additionalProperties: false
+          properties:
+            as_of: {type: string, format: date}
+            series: {type: array, maxItems: 500, uniqueItems: true, items: {$ref: '#/components/schemas/KeyPattern'}}
+            checks: {type: array, maxItems: 5, uniqueItems: true, items: {type: string, enum: [stale, missing_scores, insufficient_history, outliers, bad_categories]}}
+
+    # ------------------------------------------------------------ schedules
+    ScheduleFields:
+      type: object
+      properties:
+        args:
+          type: object
+          maxProperties: 50
+          description: Job args; `$today`, `$prev_month_end`, `$month_end` and `$slot` are resolved at enqueue time.
+        schedule_type: {type: string, enum: [cron, interval, calendar]}
+        expr:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 'cron (`0 7 * * *`), interval (`6h`), or calendar (`business_day:10`, `month_day:12`, `month_end+3bd`, `review:quarterly`).'
+        timezone: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z_]+(/[A-Za-z_+\-0-9]+){0,2}$', default: Asia/Kolkata}
+        overlap_policy: {type: string, enum: [skip, queue, cancel_previous], default: skip}
+        catchup_policy: {type: string, enum: [none, latest, all], default: latest}
+        jitter_secs: {type: integer, minimum: 0, maximum: 3600, default: 0}
+        enabled: {type: boolean, default: true}
+    ScheduleInput:
+      allOf:
+        - $ref: '#/components/schemas/ScheduleFields'
+        - type: object
+          required: [name, kind, schedule_type, expr]
+          properties:
+            name: {type: string, pattern: '^[a-z0-9][a-z0-9\-]{0,62}$'}
+            kind: {$ref: '#/components/schemas/Key'}
+      unevaluatedProperties: false
+    SchedulePatch:
+      allOf:
+        - $ref: '#/components/schemas/ScheduleFields'
+      minProperties: 1
+      unevaluatedProperties: false
+    Schedule:
+      type: object
+      required: [id, name, kind, args, schedule_type, expr, timezone, overlap_policy, catchup_policy, jitter_secs, enabled, next_run_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        kind: {$ref: '#/components/schemas/Key'}
+        args: {type: object}
+        schedule_type: {type: string, enum: [cron, interval, calendar]}
+        expr: {type: string}
+        timezone: {type: string}
+        overlap_policy: {type: string}
+        catchup_policy: {type: string}
+        jitter_secs: {type: integer}
+        enabled: {type: boolean}
+        next_run_at: {type: string, format: date-time}
+        last_run: {anyOf: [{$ref: '#/components/schemas/JobRef'}, {type: 'null'}]}
+
+    # ------------------------------------------------------------ model configs
+    PatchOp:
+      type: object
+      additionalProperties: false
+      required: [op, path]
+      properties:
+        op: {type: string, enum: [add, remove, replace, move, copy, test]}
+        path: {type: string, maxLength: 256, pattern: '^(/[^/]{1,64}){1,10}$'}
+        from: {type: string, maxLength: 256, pattern: '^(/[^/]{1,64}){1,10}$'}
+        value: {description: Any JSON value; the whole body is bounded by MAX_REQUEST_BYTES.}
+    ModelConfigCreate:
+      type: object
+      additionalProperties: false
+      required: [base_version, patch]
+      properties:
+        base_version: {type: integer, minimum: 1}
+        patch: {type: array, minItems: 1, maxItems: 200, items: {$ref: '#/components/schemas/PatchOp'}}
+        note: {type: string, maxLength: 2000}
+    ConfigValidation:
+      type: object
+      required: [ok, errors]
+      properties:
+        ok: {type: boolean}
+        errors: {type: array, items: {$ref: '#/components/schemas/Detail'}}
+    ModelConfigCreated:
+      type: object
+      required: [version, status, validation]
+      properties:
+        version: {type: integer}
+        status: {type: string, enum: [draft]}
+        validation: {$ref: '#/components/schemas/ConfigValidation'}
+    ModelConfig:
+      type: object
+      required: [model, version, status, config, created_at]
+      properties:
+        model: {$ref: '#/components/schemas/Key'}
+        version: {type: integer}
+        status: {type: string, enum: [draft, active, retired]}
+        config: {type: object, description: The model config (see configs/schema/model_config.json).}
+        note: {type: [string, 'null']}
+        effective_from: {type: [string, 'null'], format: date}
+        created_by: {anyOf: [{$ref: '#/components/schemas/UserRef'}, {type: 'null'}]}
+        created_at: {type: string, format: date-time}
+
+    # ------------------------------------------------------------ runs
+    RunStatus:
+      type: string
+      enum: [running, draft, approved, published, superseded, failed]
+    RunParams:
+      type: object
+      additionalProperties: false
+      properties:
+        sectors_held: {type: array, maxItems: 20, uniqueItems: true, items: {$ref: '#/components/schemas/Key'}}
+    Warning:
+      type: object
+      required: [code]
+      properties:
+        code: {type: string}
+        series: {type: string}
+        node: {type: string}
+        used: {type: number}
+    Run:
+      type: object
+      required: [id, model, config_version, as_of, knowledge_cutoff, status, warnings]
+      properties:
+        id: {type: string, format: uuid}
+        model: {$ref: '#/components/schemas/Key'}
+        config_version: {type: integer}
+        risk_profile: {type: string}
+        as_of: {type: string, format: date}
+        knowledge_cutoff: {type: string, format: date-time}
+        params: {type: object}
+        status: {$ref: '#/components/schemas/RunStatus'}
+        warnings: {type: array, items: {$ref: '#/components/schemas/Warning'}}
+        summary:
+          type: object
+          properties:
+            l1:
+              type: array
+              items:
+                type: object
+                properties:
+                  bucket: {$ref: '#/components/schemas/Key'}
+                  composite: {type: number}
+                  veto: {type: boolean}
+                  tilt: {type: number}
+                  final: {type: number}
+                  neutral: {type: number}
+            sector_qualifiers:
+              type: array
+              items:
+                type: object
+                properties:
+                  sector: {$ref: '#/components/schemas/Key'}
+                  composite: {type: number}
+        job_run_id: {type: [string, 'null'], format: uuid}
+        approved_by: {anyOf: [{$ref: '#/components/schemas/UserRef'}, {type: 'null'}]}
+        approved_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+    RunValue:
+      type: object
+      required: [node, value, step, is_override]
+      properties:
+        node: {type: string}
+        value: {type: [number, boolean, 'null']}
+        step: {type: string}
+        is_override: {type: boolean}
+    NodeLineage:
+      type: object
+      required: [node, value, step, inputs]
+      properties:
+        node: {type: string}
+        value: {type: [number, boolean, 'null']}
+        step: {type: string}
+        formula: {type: string}
+        inputs:
+          type: object
+          properties:
+            nodes: {type: object, additionalProperties: {type: [number, boolean, 'null']}}
+            params: {type: object, additionalProperties: {type: number}}
+            datapoints:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: {type: integer, format: int64}
+                  series: {type: string}
+                  value: {$ref: '#/components/schemas/Value'}
+    AllocationLine:
+      type: object
+      required: [line_item, group, group_weight, within_group, portfolio_weight, neutral]
+      properties:
+        line_item: {$ref: '#/components/schemas/Key'}
+        group: {$ref: '#/components/schemas/Key'}
+        group_weight: {$ref: '#/components/schemas/Decimal'}
+        within_group: {$ref: '#/components/schemas/Decimal'}
+        portfolio_weight: {$ref: '#/components/schemas/Decimal'}
+        neutral: {$ref: '#/components/schemas/Decimal'}
+    RunAllocations:
+      type: object
+      required: [run_id, profile, lines, total]
+      properties:
+        run_id: {type: string, format: uuid}
+        profile: {type: string}
+        lines: {type: array, items: {$ref: '#/components/schemas/AllocationLine'}}
+        total: {$ref: '#/components/schemas/Decimal'}
+    RunComparison:
+      type: object
+      required: [a, b, moves, nodes]
+      properties:
+        a: {type: string, format: uuid}
+        b: {type: string, format: uuid}
+        moves: {type: array, items: {$ref: '#/components/schemas/AllocationMove'}}
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [node]
+            properties:
+              node: {type: string}
+              a: {type: [number, boolean, 'null']}
+              b: {type: [number, boolean, 'null']}
+    NodeOverrideInput:
+      type: object
+      additionalProperties: false
+      required: [node_key, as_of, value, reason]
+      properties:
+        node_key: {$ref: '#/components/schemas/Key'}
+        as_of: {type: string, format: date}
+        value: {type: [number, boolean]}
+        reason: {type: string, minLength: 1, maxLength: 2000}
+        valid_until: {type: string, format: date}
+    NodeOverride:
+      type: object
+      required: [id, node_key, as_of, value, reason, actor, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        node_key: {type: string}
+        as_of: {type: string, format: date}
+        value: {type: [number, boolean]}
+        reason: {type: string}
+        valid_until: {type: [string, 'null'], format: date}
+        actor: {$ref: '#/components/schemas/UserRef'}
+        created_at: {type: string, format: date-time}
+
+    # ------------------------------------------------------------ risk profiles
+    NeutralWeights:
+      type: object
+      minProperties: 1
+      maxProperties: 200
+      propertyNames: {$ref: '#/components/schemas/Key'}
+      additionalProperties: {type: number, minimum: 0, maximum: 1}
+    RiskProfileInput:
+      type: object
+      additionalProperties: false
+      required: [key, name, neutral_weights]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        name: {type: string, minLength: 1, maxLength: 200}
+        neutral_weights: {$ref: '#/components/schemas/NeutralWeights'}
+    RiskProfilePatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        neutral_weights: {$ref: '#/components/schemas/NeutralWeights'}
+    RiskProfile:
+      type: object
+      required: [key, name, version, neutral_weights]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        name: {type: string}
+        version: {type: integer, minimum: 1}
+        neutral_weights:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/Decimal'}
+
+    # ------------------------------------------------------------ quality and audit
+    QualityReport:
+      type: object
+      required: [as_of, stale, outliers, insufficient_history, missing_scores, bad_categories]
+      properties:
+        as_of: {type: string, format: date}
+        stale:
+          type: array
+          items:
+            type: object
+            properties:
+              series: {type: string}
+              last_obs: {type: string, format: date}
+              expected_by: {type: string, format: date}
+        outliers:
+          type: array
+          items:
+            type: object
+            properties:
+              series: {type: string}
+              obs_date: {type: string, format: date}
+              value: {type: number}
+              z: {type: number}
+        insufficient_history:
+          type: array
+          items:
+            type: object
+            properties:
+              series: {type: string}
+              obs: {type: integer}
+              min: {type: integer}
+        missing_scores: {type: array, items: {type: string}}
+        bad_categories:
+          type: array
+          items:
+            type: object
+            properties:
+              series: {type: string}
+              obs_date: {type: string, format: date}
+              value: {type: string}
+    AuditRecord:
+      type: object
+      required: [id, at, actor_kind, entity, entity_id, action]
+      properties:
+        id: {type: integer, format: int64}
+        at: {type: string, format: date-time}
+        actor: {anyOf: [{$ref: '#/components/schemas/UserRef'}, {type: 'null'}]}
+        actor_kind: {type: string, enum: [user, api_key, system]}
+        request_id: {type: [string, 'null']}
+        entity: {type: string}
+        entity_id: {type: string}
+        action: {type: string}
+        before: {type: [object, 'null']}
+        after: {type: [object, 'null']}
+
+    # ------------------------------------------------------------ portfolio, draft, signals
+    VersionRef:
+      type: string
+      pattern: '^(published|draft|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'
+      default: published
+    CompareRef:
+      type: string
+      pattern: '^(draft|published|neutral|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'
+    PortfolioAllocation:
+      type: object
+      required: [portfolio, version, asset_classes, sleeves, drivers, vetoes]
+      properties:
+        portfolio: {$ref: '#/components/schemas/Key'}
+        version:
+          type: object
+          required: [kind]
+          properties:
+            id: {type: [string, 'null'], format: uuid}
+            kind: {type: string, enum: [published, review, draft]}
+            as_of: {type: string, format: date}
+            published_at: {type: [string, 'null'], format: date-time}
+        asset_classes:
+          type: array
+          items:
+            type: object
+            required: [node, weight]
+            properties:
+              node: {$ref: '#/components/schemas/Key'}
+              weight: {type: number}
+              compare: {type: number}
+              composite: {type: number}
+        sleeves:
+          type: array
+          items:
+            type: object
+            required: [node, group, weight]
+            properties:
+              node: {$ref: '#/components/schemas/Key'}
+              group: {$ref: '#/components/schemas/Key'}
+              weight: {type: number}
+              within_group: {type: number}
+              neutral: {type: number}
+              delta: {type: number}
+              veto: {type: boolean}
+              sleeve: {type: boolean}
+        drivers:
+          type: object
+          additionalProperties: {type: object, additionalProperties: {type: number}}
+        vetoes:
+          type: array
+          items:
+            type: object
+            required: [node, source]
+            properties:
+              node: {$ref: '#/components/schemas/Key'}
+              source: {type: string}
+              note: {type: string}
+    DraftEdit:
+      oneOf:
+        - $ref: '#/components/schemas/EditSetParam'
+        - $ref: '#/components/schemas/EditSetScore'
+        - $ref: '#/components/schemas/EditSetRubric'
+        - $ref: '#/components/schemas/EditClearOverride'
+      discriminator:
+        propertyName: op
+        mapping:
+          set_param: '#/components/schemas/EditSetParam'
+          set_score: '#/components/schemas/EditSetScore'
+          set_rubric: '#/components/schemas/EditSetRubric'
+          clear_override: '#/components/schemas/EditClearOverride'
+    EditSetParam:
+      type: object
+      additionalProperties: false
+      required: [op, path, value]
+      properties:
+        op: {type: string, const: set_param}
+        path: {type: string, maxLength: 256, pattern: '^(/[^/]{1,64}){1,10}$'}
+        value: {type: [number, string, boolean], maxLength: 64}
+    EditSetScore:
+      type: object
+      additionalProperties: false
+      required: [op, key, value]
+      properties:
+        op: {type: string, const: set_score}
+        key: {$ref: '#/components/schemas/Key'}
+        value: {type: number, minimum: 0, maximum: 100}
+        expires: {type: string, format: date}
+    EditSetRubric:
+      type: object
+      additionalProperties: false
+      required: [op, key, conditions]
+      properties:
+        op: {type: string, const: set_rubric}
+        key: {$ref: '#/components/schemas/Key'}
+        conditions: {$ref: '#/components/schemas/RubricConditions'}
+    EditClearOverride:
+      type: object
+      additionalProperties: false
+      required: [op, key]
+      properties:
+        op: {type: string, const: clear_override}
+        key: {$ref: '#/components/schemas/Key'}
+    DraftEvaluate:
+      type: object
+      additionalProperties: false
+      required: [rev, edits]
+      properties:
+        rev: {type: integer, minimum: 1}
+        edits: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/DraftEdit'}}
+    DraftPatch:
+      type: object
+      additionalProperties: false
+      required: [rev, edits, reason]
+      properties:
+        rev: {type: integer, minimum: 1}
+        edits: {type: array, minItems: 1, maxItems: 200, items: {$ref: '#/components/schemas/DraftEdit'}}
+        reason: {type: string, minLength: 1, maxLength: 2000}
+    Draft:
+      type: object
+      required: [model, rev, config, overrides]
+      properties:
+        model: {$ref: '#/components/schemas/Key'}
+        rev: {type: integer, minimum: 1}
+        base_version: {type: [string, 'null'], format: uuid}
+        changed_since_published:
+          type: object
+          properties:
+            scores: {type: integer}
+            vetoes: {type: integer}
+            parameters: {type: integer}
+        config: {type: object}
+        overrides:
+          type: array
+          items:
+            type: object
+            required: [key, value]
+            properties:
+              key: {$ref: '#/components/schemas/Key'}
+              value: {$ref: '#/components/schemas/Value'}
+              reason: {type: string}
+              expires: {type: [string, 'null'], format: date}
+        updated_by: {anyOf: [{$ref: '#/components/schemas/UserRef'}, {type: 'null'}]}
+        updated_at: {type: string, format: date-time}
+    AllocationMove:
+      type: object
+      required: [node, from, to, delta]
+      properties:
+        node: {$ref: '#/components/schemas/Key'}
+        from: {type: number}
+        to: {type: number}
+        delta: {type: number}
+    DraftPreview:
+      type: object
+      required: [allocation, sleeves, diff_vs_saved, warnings]
+      properties:
+        allocation: {type: object, additionalProperties: {type: number}}
+        sleeves: {type: object, additionalProperties: {type: number}}
+        diff_vs_saved: {type: array, items: {$ref: '#/components/schemas/AllocationMove'}}
+        warnings: {type: array, items: {$ref: '#/components/schemas/Warning'}}
+    RubricConditions:
+      type: object
+      minProperties: 1
+      maxProperties: 20
+      propertyNames: {pattern: '^[a-z][a-z0-9_]{0,31}$'}
+      additionalProperties: {type: string, pattern: '^[a-z0-9_]{1,64}$'}
+    RubricAnswer:
+      type: object
+      additionalProperties: false
+      required: [obs_date, conditions]
+      properties:
+        obs_date: {type: string, format: date}
+        conditions: {$ref: '#/components/schemas/RubricConditions'}
+        note: {type: string, maxLength: 2000}
+    Rubric:
+      type: object
+      required: [key, base, conditions]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        base: {type: number}
+        conditions:
+          type: array
+          items:
+            type: object
+            required: [id, options]
+            properties:
+              id: {type: string}
+              label: {type: string}
+              options:
+                type: array
+                items:
+                  type: object
+                  required: [id, add]
+                  properties:
+                    id: {type: string}
+                    label: {type: string}
+                    add: {type: number}
+        current:
+          type: [object, 'null']
+          properties:
+            score: {type: number}
+            answered_at: {type: string, format: date}
+            stale_days: {type: integer}
+    Signals:
+      type: object
+      required: [draft_rev, rows]
+      properties:
+        draft_rev: {type: integer}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, node, signal, score, weight, contribution]
+            properties:
+              key: {$ref: '#/components/schemas/Key'}
+              node: {$ref: '#/components/schemas/Key'}
+              signal: {type: string}
+              score: {type: number}
+              weight: {type: number}
+              contribution: {type: number, description: '(score − 50) × weight, in composite points.'}
+              source: {type: string}
+              freshness: {type: string, enum: [fresh, stale, missing]}
+    Sensitivity:
+      type: object
+      required: [draft_rev, bump, rows]
+      properties:
+        draft_rev: {type: integer}
+        bump: {type: number}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, impact_pp]
+            properties:
+              key: {$ref: '#/components/schemas/Key'}
+              impact_pp: {type: number}
+    Fragility:
+      type: object
+      required: [perturbation, rollups]
+      properties:
+        perturbation: {type: number}
+        rollups:
+          type: array
+          items:
+            type: object
+            required: [node, min, max, range_pp]
+            properties:
+              node: {$ref: '#/components/schemas/Key'}
+              min: {type: number}
+              max: {type: number}
+              range_pp: {type: number}
+
+    # ------------------------------------------------------------ registry and explain
+    Registry:
+      type: object
+      required: [totals, rows]
+      properties:
+        totals:
+          type: object
+          properties:
+            tracked: {type: integer}
+            live: {type: integer}
+            mock: {type: integer}
+            by_group: {type: object, additionalProperties: {type: integer}}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, name, group, update_type, freshness]
+            properties:
+              key: {$ref: '#/components/schemas/Key'}
+              name: {type: string}
+              group: {$ref: '#/components/schemas/RegistryGroup'}
+              update_type: {type: string}
+              source: {type: string}
+              owner: {type: string}
+              value: {$ref: '#/components/schemas/Value'}
+              freshness: {type: string, enum: [fresh, stale, missing]}
+              frequency: {$ref: '#/components/schemas/Frequency'}
+              last_updated: {type: [string, 'null'], format: date}
+              observed_at: {type: [string, 'null'], format: date}
+              flags: {type: array, items: {type: string}}
+              overridden: {type: boolean}
+              upstream:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key: {$ref: '#/components/schemas/Key'}
+                    value: {$ref: '#/components/schemas/Value'}
+    Explanation:
+      type: object
+      required: [key, formula, inputs]
+      properties:
+        key: {$ref: '#/components/schemas/Key'}
+        score: {type: [number, 'null']}
+        sources: {type: array, items: {type: string}}
+        observed: {type: [string, 'null'], format: date}
+        freshness: {type: string, enum: [fresh, stale, missing]}
+        formula: {type: string}
+        inputs:
+          type: array
+          items:
+            type: object
+            required: [key, value]
+            properties:
+              key: {$ref: '#/components/schemas/Key'}
+              label: {type: string}
+              value: {$ref: '#/components/schemas/Value'}
+              unit: {type: string}
+              source: {type: string}
+              observed: {type: string, format: date}
+        parts:
+          type: array
+          items:
+            type: object
+            required: [id, title, steps]
+            properties:
+              id: {type: string}
+              title: {type: string}
+              result: {type: number}
+              direction: {type: string, enum: [as_is, inverted]}
+              steps: {type: array, items: {type: string}}
+        final: {type: string}
+        notes: {type: array, items: {type: string}}
+
+    # ------------------------------------------------------------ versions
+    VersionCreate:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [review, published]}
+        label: {type: string, maxLength: 200}
+        reason: {type: string, maxLength: 2000}
+        rev: {type: integer, minimum: 1, description: Expected draft revision; a stale value returns 409.}
+    VersionCreated:
+      type: object
+      required: [id, kind, status]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [review, published]}
+        status: {type: string, enum: [active, superseded, saved]}
+        frozen_inputs: {type: integer}
+        superseded: {type: [string, 'null'], format: uuid}
+    VersionSummary:
+      type: object
+      required: [id, kind, status, as_of, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [review, published]}
+        status: {type: string, enum: [active, superseded, saved]}
+        label: {type: [string, 'null']}
+        reason: {type: [string, 'null']}
+        as_of: {type: string, format: date}
+        created_by: {anyOf: [{$ref: '#/components/schemas/UserRef'}, {type: 'null'}]}
+        created_at: {type: string, format: date-time}
+        published_at: {type: [string, 'null'], format: date-time}
+    Version:
+      allOf:
+        - $ref: '#/components/schemas/VersionSummary'
+        - type: object
+          required: [config, inputs, allocation]
+          properties:
+            config: {type: object}
+            inputs:
+              type: object
+              description: Every input with its datapoint id and source, keyed by series key.
+              additionalProperties: {$ref: '#/components/schemas/SnapshotValue'}
+            run_id: {type: string, format: uuid}
+            allocation: {type: array, items: {$ref: '#/components/schemas/AllocationLine'}}
+    Comparison:
+      type: object
+      required: [totals, allocation_moves, inputs]
+      properties:
+        totals:
+          type: object
+          properties:
+            changes: {type: integer}
+            scores: {type: integer}
+            vetoes: {type: integer}
+            parameters: {type: integer}
+        allocation_moves: {type: array, items: {$ref: '#/components/schemas/AllocationMove'}}
+        inputs:
+          type: array
+          items:
+            type: object
+            required: [key, kind]
+            properties:
+              key: {type: string}
+              kind: {type: string, enum: [score, veto, parameter]}
+              source: {type: string, enum: [auto, manual, parameter]}
+              from: {$ref: '#/components/schemas/Value'}
+              to: {$ref: '#/components/schemas/Value'}
+
+    # ------------------------------------------------------------ backtests
+    Fund:
+      type: object
+      required: [scheme_code, name]
+      properties:
+        scheme_code: {type: string}
+        name: {type: string}
+        amc: {type: [string, 'null']}
+        category: {type: [string, 'null']}
+        plan: {type: [string, 'null']}
+    Money:
+      type: number
+      minimum: 0
+      maximum: 1000000000000
+      multipleOf: 0.01
+    BacktestRequest:
+      type: object
+      additionalProperties: false
+      required: [source, benchmark, total_amount, purchase_date, legs]
+      properties:
+        name: {type: string, maxLength: 200}
+        source:
+          type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind: {type: string, enum: [draft, version]}
+            id: {type: string, format: uuid, description: Required when kind is version.}
+        benchmark: {$ref: '#/components/schemas/Key'}
+        total_amount: {allOf: [{$ref: '#/components/schemas/Money'}], exclusiveMinimum: 0}
+        purchase_date: {type: string, format: date}
+        legs:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [sleeve, scheme_code, amount]
+            properties:
+              sleeve: {$ref: '#/components/schemas/Key'}
+              scheme_code: {type: string, pattern: '^[0-9A-Za-z]{1,20}$'}
+              amount: {allOf: [{$ref: '#/components/schemas/Money'}], exclusiveMinimum: 0}
+              purchase_date: {type: string, format: date, description: Defaults to the request's purchase_date.}
+    Pair:
+      type: object
+      properties:
+        allocation: {type: number}
+        benchmark: {type: number}
+        difference: {type: number}
+    Backtest:
+      type: object
+      required: [id, status]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: [string, 'null']}
+        status: {type: string, enum: [queued, running, completed, failed, cancelled]}
+        position: {type: integer, minimum: 1, description: Queue position while queued.}
+        source: {type: object}
+        benchmark: {type: string}
+        legs: {type: array, items: {type: object}}
+        summary:
+          type: [object, 'null']
+          properties:
+            invested: {type: number}
+            current: {$ref: '#/components/schemas/Pair'}
+            abs_return: {$ref: '#/components/schemas/Pair'}
+            xirr: {$ref: '#/components/schemas/Pair'}
+        series_url: {type: [string, 'null']}
+        per_fund:
+          type: array
+          items:
+            type: object
+            properties:
+              sleeve: {type: string}
+              scheme_code: {type: string}
+              invested: {type: number}
+              current: {type: number}
+              xirr: {type: number}
+        warnings: {type: array, items: {type: string}}
+        rerun_of: {type: [string, 'null'], format: uuid}
+        created_by: {$ref: '#/components/schemas/UserRef'}
+        created_at: {type: string, format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+    BacktestSeries:
+      type: object
+      required: [range, points]
+      properties:
+        range: {type: string}
+        points:
+          type: array
+          items:
+            type: object
+            required: [date, allocation, benchmark, invested]
+            properties:
+              date: {type: string, format: date}
+              allocation: {type: number}
+              benchmark: {type: number}
+              invested: {type: number}
+
+    # ------------------------------------------------------------ workspace
+    SearchHit:
+      type: object
+      required: [kind, key, title]
+      properties:
+        kind: {type: string, enum: [series, node, parameter, note]}
+        key: {type: string}
+        title: {type: string}
+        snippet: {type: string, description: Plain text; never HTML.}
+    CadenceRhythm:
+      type: object
+      required: [rhythm, every_days, days_remaining]
+      properties:
+        rhythm: {type: string}
+        every_days: {type: integer, minimum: 1}
+        last_entry: {type: [string, 'null'], format: date}
+        days_remaining: {type: integer}

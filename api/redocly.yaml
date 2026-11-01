@@ -1,0 +1,14 @@
+# Lint config for api/openapi.yaml: `npx @redocly/cli@1.34.0 lint --config api/redocly.yaml api/openapi.yaml`
+extends:
+  - recommended
+rules:
+  info-license: error
+  info-license-url: off            # proprietary; identified by SPDX LicenseRef instead of a URL
+  operation-operationId: error
+  operation-4xx-response: error
+  security-defined: error
+  no-unused-components: error
+  no-invalid-media-type-examples:
+    severity: error
+    allowAdditionalProperties: false
+  no-ambiguous-paths: error
