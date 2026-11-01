@@ -1,0 +1,39 @@
+# Team ownership (see docs/plan.md, "Execution plan with agent teams").
+# Agent teams have no GitHub accounts; the lead reviews every path and the
+# team named in the comment owns the directory.
+
+*                                @shubham-kukreja
+
+# Lead: contracts, schema, API spec, seed schemas
+/internal/*/contract.go          @shubham-kukreja
+/migrations/                     @shubham-kukreja
+/api/                            @shubham-kukreja
+/configs/schema/                 @shubham-kukreja
+/docs/security.md                @shubham-kukreja
+
+# T1 Data
+/internal/catalog/               @shubham-kukreja
+/internal/datapoints/            @shubham-kukreja
+/internal/platform/              @shubham-kukreja
+# T2 Jobs
+/internal/jobs/                  @shubham-kukreja
+# T3 Derive (+ quality.check)
+/internal/derive/                @shubham-kukreja
+/internal/quality/               @shubham-kukreja
+# T4 Ingest
+/internal/ingest/                @shubham-kukreja
+# T5 Model
+/internal/model/                 @shubham-kukreja
+# T6 API
+/internal/api/                   @shubham-kukreja
+/internal/auth/                  @shubham-kukreja
+/internal/audit/                 @shubham-kukreja
+/internal/notes/                 @shubham-kukreja
+# T7 Verify
+/testdata/                       @shubham-kukreja
+/e2e/                            @shubham-kukreja
+# T8 Migration
+/cmd/migrate-legacy/             @shubham-kukreja
+# T9 Backtest
+/internal/analytics/             @shubham-kukreja
+/internal/market/                @shubham-kukreja
