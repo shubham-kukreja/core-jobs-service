@@ -69,13 +69,17 @@ lint: ## Lint Go (incl. gosec), check vulnerabilities, validate seeds and OpenAP
 fmt: ## Format code
 	$(GOLANGCI_LINT) fmt ./...
 
+# Each module owns internal/<module>/sqlc.yaml (queries in ./queries, generated
+# code in ./internal/db), so teams never edit a shared config.
+SQLC_CONFIGS := $(wildcard internal/*/sqlc.yaml)
+
 .PHONY: sqlc
-sqlc: ## Generate typed queries
-	$(SQLC) generate
+sqlc: ## Generate typed queries for every module
+	@for f in $(SQLC_CONFIGS); do echo "sqlc $$f"; $(SQLC) generate -f $$f || exit 1; done
 
 .PHONY: sqlc-check
 sqlc-check: ## Fail if generated queries are out of date
-	@if [ -f sqlc.yaml ]; then $(SQLC) diff; else echo "sqlc: no config yet"; fi
+	@for f in $(SQLC_CONFIGS); do $(SQLC) diff -f $$f || exit 1; done
 
 .PHONY: mocks
 mocks: ## Generate mocks for module contracts
