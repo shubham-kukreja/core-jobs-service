@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/sources.json",
+  "title": "Sources",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["key", "kind", "name"],
+    "properties": {
+      "key": {"$ref": "defs.json#/$defs/key"},
+      "kind": {"enum": ["external_api", "file_import", "analyst", "override", "computed"]},
+      "name": {"$ref": "defs.json#/$defs/name"},
+      "config": {
+        "description": "Non-secret settings only. Credentials are referenced by environment variable name via credential_ref.",
+        "type": "object",
+        "properties": {
+          "base_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+          "rate_limit_per_min": {"type": "integer", "minimum": 1},
+          "credential_ref": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"}
+        },
+        "not": {"anyOf": [
+          {"required": ["api_key"]}, {"required": ["apikey"]}, {"required": ["password"]},
+          {"required": ["secret"]}, {"required": ["token"]}
+        ]},
+        "additionalProperties": false
+      }
+    }
+  }
+}

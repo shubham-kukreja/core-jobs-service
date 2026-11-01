@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/schedules.json",
+  "title": "Job schedules",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["name", "kind", "schedule_type", "expr"],
+    "properties": {
+      "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9\\-]{0,62}$"},
+      "kind": {"$ref": "defs.json#/$defs/key"},
+      "args": {"type": "object"},
+      "schedule_type": {"enum": ["cron", "interval", "calendar"]},
+      "expr": {"type": "string", "minLength": 1, "maxLength": 64},
+      "timezone": {"type": "string", "minLength": 1},
+      "overlap_policy": {"enum": ["skip", "queue", "cancel_previous"]},
+      "catchup_policy": {"enum": ["none", "latest", "all"]},
+      "jitter_secs": {"type": "integer", "minimum": 0, "maximum": 3600},
+      "enabled": {"type": "boolean"}
+    }
+  }
+}

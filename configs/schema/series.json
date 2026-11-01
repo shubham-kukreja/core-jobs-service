@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/series.json",
+  "title": "Series",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["key", "name", "layer", "value_type", "frequency"],
+    "properties": {
+      "key": {"$ref": "defs.json#/$defs/key"},
+      "name": {"$ref": "defs.json#/$defs/name"},
+      "entity": {"$ref": "defs.json#/$defs/key"},
+      "layer": {"enum": ["raw", "judgment", "derived", "window", "percentile", "score", "trigger", "veto"]},
+      "value_type": {"enum": ["num", "bool", "cat"]},
+      "unit": {"type": "string", "maxLength": 32},
+      "frequency": {"enum": ["daily", "weekly", "monthly", "quarterly", "event"]},
+      "align": {"enum": ["last", "month_end", "mean"]},
+      "allowed_values": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9_]{1,64}$"}, "minItems": 2, "uniqueItems": true},
+      "validation": {
+        "type": "object", "additionalProperties": false,
+        "properties": {"min": {"type": "number"}, "max": {"type": "number"}}
+      },
+      "derivation": {"$ref": "defs.json#/$defs/derivation"},
+      "min_history": {"type": "integer", "minimum": 1},
+      "source_priority": {"type": "array", "items": {"$ref": "defs.json#/$defs/key"}, "minItems": 1, "uniqueItems": true},
+      "tags": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9_]{1,32}$"}, "uniqueItems": true},
+      "meta": {"type": "object"},
+      "registry": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "display_name": {"$ref": "defs.json#/$defs/name"},
+          "node": {"$ref": "defs.json#/$defs/key"},
+          "signal": {"$ref": "defs.json#/$defs/key"},
+          "group": {"enum": ["equity", "debt", "metals", "governance", "veto"]},
+          "update_type": {"enum": ["derived", "rubric", "analyst", "constant", "governance", "veto", "raw"]},
+          "owner": {"type": "string", "maxLength": 64},
+          "stale_after": {"type": "string", "pattern": "^[0-9]+(h|d)$"},
+          "flags": {"type": "array", "items": {"enum": ["mock", "constant", "default"]}, "uniqueItems": true}
+        }
+      }
+    },
+    "allOf": [
+      {"if": {"properties": {"layer": {"enum": ["raw", "judgment", "veto"]}}},
+       "then": {"not": {"required": ["derivation"]}}},
+      {"if": {"properties": {"layer": {"enum": ["derived", "window", "percentile", "score"]}}},
+       "then": {"required": ["derivation"]}},
+      {"if": {"properties": {"value_type": {"const": "cat"}}},
+       "then": {"required": ["allowed_values"]},
+       "else": {"not": {"required": ["allowed_values"]}}}
+    ]
+  }
+}

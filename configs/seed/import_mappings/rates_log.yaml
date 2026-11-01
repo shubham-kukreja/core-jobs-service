@@ -1,0 +1,13 @@
+# Data Trackers – rates log. Derived and percentile columns are ignored; the
+# system recomputes them point-in-time.
+key: data_trackers.rates
+name: Data Trackers – rates log
+mapping:
+  sheet: Data Trackers
+  header_row_match: Month
+  date_column: {name: Month, format: Jan-2006, obs_date: month_end}
+  columns:
+    - {name: "10Y G-sec Yield %", series: yield.gsec10y}
+    - {name: "3Y AAA Corp Yield %", series: yield.aaa3y}
+  ignore_columns: ["AAA Spread (bps)", "10Y Yield %ile", "Spread %ile"]
+  known_at: "obs_date_plus_days:5"

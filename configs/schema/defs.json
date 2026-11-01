@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/defs.json",
+  "$defs": {
+    "key": {
+      "description": "Lowercase dotted identifier, optionally with a ::signal suffix (CORE keys). Mirrors platform.is_key in SQL.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.\\-]{0,126}(::[a-z0-9][a-z0-9_\\-]{0,62})?$"
+    },
+    "key_template": {
+      "description": "A key that may contain {bucket}/{signal} placeholders.",
+      "type": "string",
+      "pattern": "^[a-z0-9{][a-z0-9_.\\-{}]{0,126}(::[a-z0-9{][a-z0-9_\\-{}]{0,62})?$"
+    },
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "date": {"type": "string", "format": "date"},
+    "weight": {"type": "number", "minimum": 0, "maximum": 1},
+    "derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fn", "inputs"],
+      "properties": {
+        "fn": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        "inputs": {
+          "type": "object",
+          "minProperties": 0,
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,31}$"},
+          "additionalProperties": {"$ref": "#/$defs/key"}
+        },
+        "params": {"type": "object"},
+        "version": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+# Abridged: the full workbook list lands in P2-T7-03.
+- {key: pe.nifty50, name: Nifty 50 trailing P/E, entity: idx.nifty50, layer: raw, value_type: num, unit: x, frequency: daily, validation: {min: 0, max: 200}}
+- {key: pe.nifty100, name: Nifty 100 P/E, entity: idx.nifty100, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: pe.midcap150, name: Nifty Midcap 150 P/E, entity: idx.midcap150, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: yield.gsec10y, name: 10Y G-sec yield, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+- {key: yield.aaa3y, name: 3Y AAA corporate yield, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+- {key: gold.inr10g, name: Gold price, entity: metals.gold, layer: raw, value_type: num, unit: INR/10g, frequency: monthly, validation: {min: 0}}
+- {key: silver.inrkg, name: Silver price, entity: metals.silver, layer: raw, value_type: num, unit: INR/kg, frequency: monthly, validation: {min: 0}}
+- key: judg.rbi.stance
+  name: RBI stance
+  layer: judgment
+  value_type: cat
+  allowed_values: [cutting, hold, hiking]
+  frequency: monthly
+- {key: spread.mid_large, name: Mid–Large P/E spread, entity: equity.mid, layer: derived, value_type: num, unit: x, frequency: monthly,
+   derivation: {fn: expr, inputs: {mid: pe.midcap150, large: pe.nifty100}, params: {expr: "mid - large"}, version: 1}}
+- {key: spread.aaa_bps, name: AAA spread, layer: derived, value_type: num, unit: bps, frequency: monthly,
+   derivation: {fn: expr, inputs: {aaa: yield.aaa3y, g: yield.gsec10y}, params: {expr: "(aaa - g) * 100"}, version: 1}}
+- {key: ratio.gold_silver, name: Gold/silver ratio, layer: derived, value_type: num, unit: x, frequency: monthly,
+   derivation: {fn: expr, inputs: {gold: gold.inr10g, silver: silver.inrkg}, params: {expr: "gold * 100 / silver"}, version: 1}}
+- {key: gap.earnings_yield, name: Earnings-yield gap, layer: derived, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: expr, inputs: {pe: pe.nifty50, y: yield.gsec10y}, params: {expr: "100 / pe - y"}, version: 1}}
+- {key: ret.gold.12m, name: Gold 12M return, entity: metals.gold, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: gold.inr10g}, params: {months: 12}, version: 1}}
+- {key: pctile.180m.spread.mid_large, name: Mid–Large spread percentile (15Y), entity: equity.mid, layer: percentile, value_type: num, unit: pctile,
+   frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: spread.mid_large}, params: {window_months: 180}, version: 1}}
+- key: l1.equity::macro
+  name: Equity - Macro
+  entity: l1.equity
+  layer: score
+  value_type: num
+  unit: score
+  frequency: monthly
+  validation: {min: 0, max: 100}
+  derivation:
+    fn: rubric
+    inputs: {stance: judg.rbi.stance}
+    params: {base: 50, clamp: [0, 100], add: {stance: {cutting: 20, hold: 0, hiking: -20}}}
+    version: 1
+  registry: {display_name: Equity - Macro, node: l1.equity, signal: macro, group: equity, update_type: rubric, owner: Investment Team, stale_after: 40d}
+- {key: trig.currency_stress, name: Currency stress, layer: trigger, value_type: bool, frequency: event,
+   registry: {group: veto, update_type: analyst, owner: Investment Team}}

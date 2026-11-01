@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/risk_profiles.json",
+  "title": "Risk profiles",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["key", "name", "neutral_weights"],
+    "properties": {
+      "key": {"$ref": "defs.json#/$defs/key"},
+      "name": {"$ref": "defs.json#/$defs/name"},
+      "neutral_weights": {
+        "description": "Neutral weight per node. Group-level weights and within-group weights each sum to 1 (checked by the loader).",
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {"$ref": "defs.json#/$defs/key"},
+        "additionalProperties": {"$ref": "defs.json#/$defs/weight"}
+      }
+    }
+  }
+}

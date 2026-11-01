@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/import_mapping.json",
+  "title": "Import mapping",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["header_row_match", "date_column", "columns", "known_at"],
+  "properties": {
+    "sheet": {"type": "string", "maxLength": 100},
+    "header_row_match": {"type": "string", "minLength": 1, "maxLength": 100},
+    "date_column": {
+      "type": "object", "additionalProperties": false, "required": ["name", "format"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 100},
+        "format": {"type": "string", "minLength": 1, "maxLength": 32},
+        "obs_date": {"enum": ["", "month_end"]}
+      }
+    },
+    "columns": {
+      "type": "array", "minItems": 1, "maxItems": 500,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["name", "series"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 200},
+          "series": {"$ref": "defs.json#/$defs/key"}
+        }
+      }
+    },
+    "ignore_columns": {"type": "array", "items": {"type": "string", "maxLength": 200}},
+    "known_at": {"type": "string", "pattern": "^(now|obs_date_plus_days:[0-9]{1,3})$"}
+  }
+}

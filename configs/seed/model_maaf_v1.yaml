@@ -1,0 +1,62 @@
+# Abridged v1 from the plan. Debt and metals scorecard signals are not in the
+# plan ("…"); they are added from the workbook / CORE Methodology screen
+# (open question in HANDOFF.md) before Phase 3.
+model: maaf
+name: Multi-Asset Allocation Framework
+version: 1
+config:
+  steps: [composite, veto, tilt, sector_qualify, constraints, normalize, sleeve, rollup]
+  missing_score: 50
+  normalisation: proportional
+  governance:
+    percentile_window_years: 15
+    percentile_min_observations: 24
+    respect_definition_breaks: true
+  scorecards:
+    l1:
+      buckets: [l1.equity, l1.debt, l1.metals]
+      tilt_cap: 0.20
+      score_series: "{bucket}::{signal}"
+      signals:
+        - {key: valuation, weight: 0.30}
+        - {key: macro, weight: 0.20}
+        - {key: fundamentals, weight: 0.20}
+        - {key: flows, weight: 0.15}
+        - {key: momentum, weight: 0.15}
+      vetoes:
+        l1.equity: [trig.flow_froth.equity]
+        l1.metals: [trig.parabolic.gold]
+    equity:
+      parent: l1.equity
+      buckets: [equity.large, equity.mid, equity.small, equity.intl]
+      tilt_cap: 0.30
+      score_series: "{bucket}::{signal}"
+      signals:
+        - {key: valuation, weight: 0.30}
+        - {key: relvalue, weight: 0.20}
+        - {key: revisions, weight: 0.20}
+        - {key: eps_growth_diff, weight: 0.15}
+        - {key: margin_cycle, weight: 0.15}
+      vetoes:
+        "*": ["trig.flow_froth.{bucket}", "trig.amc_restrictions.{bucket}", "trig.eps_collapse.{bucket}"]
+        equity.intl: [trig.currency_stress]
+  sector_satellite:
+    parent: l1.equity
+    sectors: [sector.banking, sector.it, sector.pharma, sector.auto, sector.capgoods, sector.fmcg, sector.energy, sector.metals]
+    score_series: "{bucket}::{signal}"
+    signals:
+      - {key: valuation, weight: 0.30}
+      - {key: revisions, weight: 0.30}
+      - {key: rel_momentum, weight: 0.25}
+      - {key: cycle, weight: 0.15}
+    sleeve_cap: 0.15
+    max_sectors: 2
+    qualify_threshold: 70
+    max_quarters_held: 4
+  constraints:
+    - {name: max_multiple_of_neutral, scorecard: l1, bucket: l1.metals, params: {max: 2.0}}
+    - {name: extreme_full_cap, params: {high: 80, low: 20, consecutive_reviews: 2, normal_cap_factor: 1.0}}
+    - {name: sector_max_tenure, params: {quarters: 4}}
+  review_calendar:
+    quarterly: ["2026-12-31", "2027-03-31"]
+    semiannual: ["2026-12-31", "2027-06-30"]

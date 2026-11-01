@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/model_config.json",
+  "title": "Model config",
+  "description": "Structure only. Semantic rules (weights sum to 1, steps and constraints registered, series exist) are enforced by model.Validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["model", "version", "config"],
+  "properties": {
+    "model": {"$ref": "defs.json#/$defs/key"},
+    "name": {"$ref": "defs.json#/$defs/name"},
+    "version": {"type": "integer", "minimum": 1},
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps", "missing_score", "normalisation", "scorecards", "governance"],
+      "properties": {
+        "steps": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"}},
+        "missing_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "normalisation": {"enum": ["proportional", "zero_sum"]},
+        "scorecards": {
+          "type": "object", "minProperties": 1,
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,31}$"},
+          "additionalProperties": {"$ref": "#/$defs/scorecard"}
+        },
+        "sector_satellite": {
+          "type": "object", "additionalProperties": false,
+          "required": ["parent", "sectors", "signals", "score_series", "sleeve_cap", "max_sectors", "qualify_threshold", "max_quarters_held"],
+          "properties": {
+            "parent": {"$ref": "defs.json#/$defs/key"},
+            "sectors": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "defs.json#/$defs/key"}},
+            "signals": {"$ref": "#/$defs/signals"},
+            "score_series": {"$ref": "defs.json#/$defs/key_template"},
+            "sleeve_cap": {"type": "number", "minimum": 0, "maximum": 1},
+            "max_sectors": {"type": "integer", "minimum": 1},
+            "qualify_threshold": {"type": "number", "minimum": 0, "maximum": 100},
+            "max_quarters_held": {"type": "integer", "minimum": 1}
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+              "scorecard": {"type": "string"},
+              "bucket": {"$ref": "defs.json#/$defs/key"},
+              "params": {"type": "object"}
+            }
+          }
+        },
+        "review_calendar": {
+          "type": "object",
+          "additionalProperties": {"type": "array", "items": {"$ref": "defs.json#/$defs/date"}}
+        },
+        "governance": {
+          "type": "object", "additionalProperties": false,
+          "required": ["percentile_window_years", "percentile_min_observations", "respect_definition_breaks"],
+          "properties": {
+            "percentile_window_years": {"type": "number", "exclusiveMinimum": 0, "maximum": 50},
+            "percentile_min_observations": {"type": "integer", "minimum": 1},
+            "respect_definition_breaks": {"type": "boolean"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "signals": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["key", "weight"],
+        "properties": {"key": {"$ref": "defs.json#/$defs/key"}, "weight": {"$ref": "defs.json#/$defs/weight"}}
+      }
+    },
+    "scorecard": {
+      "type": "object", "additionalProperties": false,
+      "required": ["buckets", "tilt_cap", "signals", "score_series"],
+      "properties": {
+        "parent": {"$ref": "defs.json#/$defs/key"},
+        "buckets": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "defs.json#/$defs/key"}},
+        "tilt_cap": {"type": "number", "minimum": 0, "maximum": 1},
+        "signals": {"$ref": "#/$defs/signals"},
+        "score_series": {"$ref": "defs.json#/$defs/key_template"},
+        "vetoes": {
+          "type": "object",
+          "additionalProperties": {"type": "array", "items": {"$ref": "defs.json#/$defs/key_template"}}
+        }
+      }
+    }
+  }
+}

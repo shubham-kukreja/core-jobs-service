@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/entities.json",
+  "title": "Entities",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["key", "kind", "name"],
+    "properties": {
+      "key": {"$ref": "defs.json#/$defs/key"},
+      "kind": {"enum": ["asset_class", "segment", "bucket", "metal", "sector", "index", "macro"]},
+      "name": {"$ref": "defs.json#/$defs/name"},
+      "parent": {"$ref": "defs.json#/$defs/key"},
+      "meta": {"type": "object"}
+    }
+  }
+}

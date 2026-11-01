@@ -1,0 +1,11 @@
+# Credentials are never stored here: credential_ref names an environment variable.
+- {key: override, kind: override, name: Override}
+- {key: analyst, kind: analyst, name: Analyst}
+- {key: file_import, kind: file_import, name: File import}
+- {key: computed, kind: computed, name: Computed}
+- {key: fred, kind: external_api, name: FRED, config: {base_url: "https://api.stlouisfed.org", credential_ref: FRED_API_KEY}}
+- {key: amfi, kind: external_api, name: AMFI}
+- {key: nse, kind: external_api, name: NSE}
+- {key: rbi, kind: external_api, name: RBI / CCIL}
+- {key: mospi, kind: external_api, name: MOSPI}
+- {key: bullion, kind: external_api, name: Bullion}

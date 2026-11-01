@@ -1,0 +1,6 @@
+- {name: quality-daily, kind: quality.check, schedule_type: cron, expr: "30 8 * * 1-5", args: {as_of: "$today"}}
+- {name: data-due-monthly, kind: quality.check, schedule_type: calendar, expr: "business_day:12",
+   args: {as_of: "$prev_month_end", checks: [stale, missing_scores]}, jitter_secs: 120}
+- {name: veto-monthly, kind: veto.evaluate, schedule_type: calendar, expr: "business_day:12", args: {as_of: "$prev_month_end"}}
+- {name: review-quarterly, kind: model.run, schedule_type: calendar, expr: "review:quarterly", args: {model: maaf, as_of: "$slot", publish: false}}
+- {name: review-semiannual, kind: model.run, schedule_type: calendar, expr: "review:semiannual", args: {model: maaf, as_of: "$slot", publish: false}}

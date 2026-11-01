@@ -1,0 +1,16 @@
+# From the plan's POST /v1/risk-profiles example, mapped to CORE keys.
+- key: balanced
+  name: Balanced
+  neutral_weights:
+    l1.equity: 0.55
+    l1.debt: 0.35
+    l1.metals: 0.10
+    equity.large: 0.45
+    equity.mid: 0.20
+    equity.small: 0.15
+    equity.intl: 0.20
+    debt.liquid: 0.40
+    debt.corporate: 0.35
+    debt.gilt: 0.25
+    metals.gold: 0.75
+    metals.silver: 0.25

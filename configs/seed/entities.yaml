@@ -1,0 +1,25 @@
+# Nodes use CORE keys (decision 1 Nov 2026).
+- {key: l1.equity, kind: asset_class, name: Equity}
+- {key: l1.debt, kind: asset_class, name: Debt}
+- {key: l1.metals, kind: asset_class, name: Metals}
+- {key: equity.large, kind: segment, name: Large Cap, parent: l1.equity}
+- {key: equity.mid, kind: segment, name: Mid Cap, parent: l1.equity}
+- {key: equity.small, kind: segment, name: Small Cap, parent: l1.equity}
+- {key: equity.intl, kind: segment, name: International, parent: l1.equity}
+- {key: debt.liquid, kind: bucket, name: Liquid, parent: l1.debt}
+- {key: debt.corporate, kind: bucket, name: Corporate, parent: l1.debt}
+- {key: debt.gilt, kind: bucket, name: Gilt / Long, parent: l1.debt}
+- {key: metals.gold, kind: metal, name: Gold, parent: l1.metals}
+- {key: metals.silver, kind: metal, name: Silver, parent: l1.metals}
+- {key: sector.banking, kind: sector, name: Banking, parent: l1.equity}
+- {key: sector.it, kind: sector, name: IT Services, parent: l1.equity}
+- {key: sector.pharma, kind: sector, name: Pharma, parent: l1.equity}
+- {key: sector.auto, kind: sector, name: Auto, parent: l1.equity}
+- {key: sector.capgoods, kind: sector, name: Capital Goods, parent: l1.equity}
+- {key: sector.fmcg, kind: sector, name: FMCG, parent: l1.equity}
+- {key: sector.energy, kind: sector, name: Energy, parent: l1.equity}
+- {key: sector.metals, kind: sector, name: Metals & Mining, parent: l1.equity}
+- {key: idx.nifty50, kind: index, name: Nifty 50}
+- {key: idx.nifty100, kind: index, name: Nifty 100}
+- {key: idx.midcap150, kind: index, name: Nifty Midcap 150}
+- {key: idx.smallcap250, kind: index, name: Nifty Smallcap 250}

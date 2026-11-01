@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://core.arviawealth.com/schema/import_mapping_file.json",
+  "title": "Import mapping seed file",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["key", "name", "mapping"],
+  "properties": {
+    "key": {"$ref": "defs.json#/$defs/key"},
+    "name": {"$ref": "defs.json#/$defs/name"},
+    "mapping": {"$ref": "import_mapping.json"}
+  }
+}
