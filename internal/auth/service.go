@@ -370,7 +370,7 @@ func loginEntry(uid *int64, ci ClientInfo, entityID, action string) audit.Entry 
 	if uid == nil {
 		kind = audit.ActorSystem
 	}
-	return audit.Entry{ActorID: uid, ActorKind: kind, IP: ci.IP, Entity: "session", EntityID: entityID, Action: action}
+	return audit.Entry{ActorID: uid, ActorKind: kind, RequestID: ci.RequestID, IP: ci.IP, Entity: "session", EntityID: entityID, Action: action}
 }
 
 func systemEntry(entity, id, action string, after any) audit.Entry {

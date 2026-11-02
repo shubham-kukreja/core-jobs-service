@@ -66,7 +66,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		_ = s.auth.Logout(r.Context(), c.Value)
 	}
 
-	sess, err := s.auth.Login(r.Context(), email, req.Password, auth.ClientInfo{IP: ip, UserAgent: r.UserAgent()})
+	sess, err := s.auth.Login(r.Context(), email, req.Password, auth.ClientInfo{IP: ip, UserAgent: r.UserAgent(), RequestID: requestIDFrom(r.Context())})
 	if err != nil {
 		if !errors.Is(err, auth.ErrInvalidCredentials) && !errors.Is(err, auth.ErrLocked) {
 			s.writeError(w, r, err)

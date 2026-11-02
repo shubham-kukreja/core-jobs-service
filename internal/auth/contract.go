@@ -75,6 +75,8 @@ type User struct {
 type ClientInfo struct {
 	IP        netip.Addr
 	UserAgent string
+	// RequestID ties login and logout audit rows to the request log.
+	RequestID string
 }
 
 // Session is returned once at login. Token and CSRFToken are plaintext and
