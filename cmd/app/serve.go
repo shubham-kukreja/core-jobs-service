@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/shubham-kukreja/core-jobs-service/internal/app"
+	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/config"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/database"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/logging"
@@ -61,9 +63,24 @@ func runWorker(ctx context.Context, stderr io.Writer) error {
 		return err
 	}
 	defer pool.Close()
-	// Job engine wiring lands in P1-T2-02 (River adapter).
+	core, err := app.NewCore(pool, log, clock.System{})
+	if err != nil {
+		return err
+	}
+	w, err := core.NewWorker()
+	if err != nil {
+		return err
+	}
+	if err := w.Start(ctx); err != nil {
+		return fmt.Errorf("worker start: %w", err)
+	}
 	log.Info("worker started")
 	<-ctx.Done()
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	defer cancel()
+	if err := w.Stop(stopCtx); err != nil {
+		return fmt.Errorf("worker stop: %w", err)
+	}
 	log.Info("worker stopped")
 	return nil
 }
