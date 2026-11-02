@@ -58,6 +58,9 @@ type Config struct {
 	BlobAccessKey Secret
 	BlobSecretKey Secret
 	BlobUseTLS    bool
+	// BlobSSE requests server-side encryption on every object. Required
+	// outside development; local SeaweedFS may run without it.
+	BlobSSE bool
 
 	MetricsAddr string
 	LogLevel    string
@@ -111,6 +114,7 @@ func load(lookup lookupFunc) (Config, error) {
 		BlobAccessKey:        r.secret("BLOB_ACCESS_KEY", false),
 		BlobSecretKey:        r.secret("BLOB_SECRET_KEY", false),
 		BlobUseTLS:           r.bool("BLOB_USE_TLS", true),
+		BlobSSE:              r.bool("BLOB_SSE", true),
 		MetricsAddr:          r.str("METRICS_ADDR", ":9090"),
 		LogLevel:             r.str("LOG_LEVEL", "info"),
 	}
@@ -163,6 +167,9 @@ func (c Config) validate() []error {
 	}
 	if c.IsProduction() && !c.BlobUseTLS {
 		errs = append(errs, errors.New("BLOB_USE_TLS: must be true outside development"))
+	}
+	if c.IsProduction() && !c.BlobSSE {
+		errs = append(errs, errors.New("BLOB_SSE: must be true outside development"))
 	}
 	return errs
 }

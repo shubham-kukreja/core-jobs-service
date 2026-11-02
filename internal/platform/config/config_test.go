@@ -38,6 +38,7 @@ func TestLoadRejectsInvalid(t *testing.T) {
 		"http cors in prd":          {"DATABASE_URL": "x", "SECRET_KEY": strings.Repeat("k", 32), "APP_ENV": "production", "CORS_ORIGINS": "http://a.com"},
 		"bad env":                   {"DATABASE_URL": "x", "SECRET_KEY": strings.Repeat("k", 32), "APP_ENV": "prod"},
 		"prod without verified tls": {"DATABASE_URL": "postgres://u:p@db/app?sslmode=require", "SECRET_KEY": strings.Repeat("k", 32), "APP_ENV": "production"},
+		"prod without sse":          {"DATABASE_URL": "postgres://u:p@db/app?sslmode=verify-full", "SECRET_KEY": strings.Repeat("k", 32), "APP_ENV": "production", "BLOB_SSE": "false"},
 		"bad ttl":                   {"DATABASE_URL": "x", "SECRET_KEY": strings.Repeat("k", 32), "SESSION_IDLE_TTL": "2h", "SESSION_ABSOLUTE_TTL": "1h"},
 	}
 	for name, m := range cases {

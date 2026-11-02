@@ -8,6 +8,7 @@ REDOCLY       := npx --yes @redocly/cli@1.34.0
 # Local development connection strings (throwaway values from docker-compose.yml).
 DEV_OWNER_URL   := postgres://core_owner:dev_owner_password@127.0.0.1:5432/core?sslmode=disable
 DEV_APP_URL     := postgres://core_app:dev_app_password@127.0.0.1:5432/core?sslmode=disable
+TEST_S3_ENV     := TEST_S3_ENDPOINT=127.0.0.1:9000 TEST_S3_BUCKET=core-dev TEST_S3_ACCESS_KEY=dev_s3_access TEST_S3_SECRET_KEY=dev_s3_secret_key
 TEST_ADMIN_URL  := postgres://core_owner:dev_owner_password@127.0.0.1:5432/postgres?sslmode=disable
 
 DEV_ENV := APP_ENV=development HTTP_ADDR=127.0.0.1:8088 DATABASE_URL='$(DEV_APP_URL)' MIGRATION_DATABASE_URL='$(DEV_OWNER_URL)' \
@@ -24,6 +25,7 @@ up: ## Start Postgres and S3, apply migrations, grant the dev runtime user
 	docker compose up -d --wait
 	$(DEV_ENV) go run ./cmd/app migrate up
 	docker compose exec -T postgres psql -U core_owner -d core -qc 'GRANT app_runtime TO core_app'
+	echo 's3.bucket.create -name core-dev' | docker compose exec -T s3 weed shell >/dev/null
 
 .PHONY: down
 down: ## Stop containers (keeps data)
@@ -46,8 +48,8 @@ run-worker: ## Run the worker against local containers
 	$(DEV_ENV) go run ./cmd/app worker
 
 .PHONY: test
-test: ## Run all tests, including database tests against local Postgres
-	TEST_DATABASE_URL='$(TEST_ADMIN_URL)' go test -race -count=1 ./...
+test: ## Run all tests, including database and S3 tests against local containers
+	$(TEST_S3_ENV) TEST_DATABASE_URL='$(TEST_ADMIN_URL)' go test -race -count=1 ./...
 
 .PHONY: test-unit
 test-unit: ## Run tests that need no database
