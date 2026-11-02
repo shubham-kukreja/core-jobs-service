@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -632,11 +633,5 @@ func mapValues(m map[string]string) []string {
 
 func uniqueSorted(s []string) []string {
 	sort.Strings(s)
-	out := s[:0]
-	for i, v := range s {
-		if i == 0 || v != s[i-1] {
-			out = append(out, v)
-		}
-	}
-	return out
+	return slices.Compact(s)
 }
