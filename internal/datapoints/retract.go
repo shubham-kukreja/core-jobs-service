@@ -18,7 +18,7 @@ import (
 const (
 	// The runtime role cannot SELECT … FOR UPDATE on append-only tables, so
 	// retractions of one datapoint are serialised with an advisory lock.
-	sqlLockRetract = `SELECT pg_advisory_xact_lock(hashtextextended('dp.retract:' || $1::text, 0))`
+	sqlLockRetract = `SELECT pg_advisory_xact_lock(hashtextextended('dp.retract:' || $1::bigint::text, 0))`
 
 	sqlRetractTarget = `
 SELECT d.series_id, d.obs_date, d.source_id, d.status,
