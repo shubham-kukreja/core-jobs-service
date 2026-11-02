@@ -4,6 +4,53 @@ Shared log between the lead and teams. Newest entry first. Each entry says
 what's done, what's next, and any contract change. The plan is `docs/plan.md`
 and security rules are in `docs/security.md`.
 
+## 2026-11-02 — Phase 1, T1 Data
+
+**Done** (no contract changes)
+
+| Task | Output |
+| --- | --- |
+| P1-T1-01 | `catalog.Store` on sqlc (`internal/catalog/sqlc.yaml`, `queries/`): entities, sources, series CRUD; `ListSeries` keyset paging, trailing-`*` wildcards with LIKE metacharacters escaped; errors mapped to `apperr` (`ErrNotFound` → not_found, `ErrCycle` → conflict) |
+| P1-T1-02 | `series_deps` rebuilt on save under an advisory lock; cycle detection and topological `Downstream` in memory (`graph.go`); derivation version bumps (and `Rebuild=true`) only when fn/inputs/params change |
+| P1-T1-03 | `datapoints.Store.Write`: per-point validation, no-op skip (same value per source; computed rows by `input_hash`), one `unnest` insert, one outbox event, all in the caller's tx; `Retract` with retraction rows and an outbox event; max 10,000 points per call |
+| P1-T1-04 | PIT reader (`At/Range/History/Snapshot/Versions/Get/Lineage/Batch`); `Outbox.Claim/MarkDispatched`; `RawPayloads.Record` |
+| P1-T1-05 | `blob.S3` (minio-go): SSE-S3 option, `Verify` rejects public bucket policies, streaming size-capped `Put` with sha256, partial uploads removed, keys reject traversal, URIs for other buckets rejected |
+| P1-T1-07 (repo) | Registry metadata on `Series.Registry`; `SeriesFilter.Group` |
+
+**Behaviour other teams rely on**
+
+- **Source priority:** entries are source keys or source kinds. A kind
+  expands to all sources of that kind, ordered by key.
+- **Retractions:** a retraction hides only the row it supersedes, so a read
+  falls back to that source's previous value. Retracting twice is
+  `conflict`. Retractions emit `datapoints.written`, so the cascade
+  recomputes.
+- **Who may write which layer:**
+  - `computed` writes derived/window/percentile/score/trigger/veto.
+  - `analyst` writes raw/judgment/trigger.
+  - `file_import` and external APIs write raw only.
+  - `override` may write any layer.
+  - Analyst and override writes require `ActorID`.
+- **Null values:** only `computed` may write null ("not computable", e.g.
+  below `min_obs`).
+- **Datapoints never read catalog tables:** series and sources come through
+  `catalog.Reader`. The source list is cached for 1 minute.
+
+**Not verified yet:** Docker was hung for this whole task.
+
+- `store_db_test.go` in catalog and datapoints compiles but has not run. It
+  covers PIT table tests, retraction before and after the cutoff, rollback,
+  outbox claim with SKIP LOCKED, and the cycle-rejection rollback.
+- `TestS3RoundTrip` has not run against SeaweedFS (needs `TEST_S3_*`).
+- Coverage with Docker down: catalog 41%, datapoints 19%, blob 30%. The DB
+  tests are what reach 80%.
+- Run `make up && make test` before merging.
+
+**Next:**
+
+- When G1 is wired, connect `blob.S3.Verify` at startup.
+- Create the dev bucket for SeaweedFS (`make up` doesn't do that yet).
+
 ## 2026-11-01 — T7 Verify (lead, P1-T7-01/02)
 
 **Done**
