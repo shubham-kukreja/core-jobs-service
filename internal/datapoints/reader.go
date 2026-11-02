@@ -12,6 +12,7 @@ import (
 
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
+	"github.com/shubham-kukreja/core-jobs-service/internal/platform/calendar"
 )
 
 // Lineage walks are bounded so a deep or wide graph cannot exhaust memory.
@@ -145,7 +146,7 @@ var earliest = civil.Date{Year: 1900, Month: 1, Day: 1}
 func (s *Store) History(ctx context.Context, series string, upTo civil.Date, window Months, o ReadOpts) ([]Resolved, error) {
 	from := earliest
 	if window > 0 {
-		from = upTo.AddMonths(-int(window)).AddDays(1)
+		from = calendar.WindowStart(upTo, int(window))
 	}
 	return s.Range(ctx, series, from, upTo, o)
 }
