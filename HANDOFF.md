@@ -4,6 +4,53 @@ Shared log between the lead and teams. Newest entry first. Each entry says
 what's done, what's next, and any contract change. The plan is `docs/plan.md`
 and security rules are in `docs/security.md`.
 
+## 2026-11-02 — Phase 1 integration (lead)
+
+**Done**
+
+- **Merged to `main`:** T1, T2 and T6. On `main`, `go build`, `go vet`,
+  golangci-lint (0 issues), govulncheck (no reachable vulnerabilities) and
+  every non-database test pass.
+- **Composition root (`internal/app`):** `NewCore` (catalog, datapoints, jobs),
+  `NewWorker` (executor, scheduler, outbox dispatcher via an adapter from
+  `datapoints.Outbox` to `jobs.OutboxSource`), `NewAPI` and `NewAuth`.
+- **`app api` serves `/v1`**, `app worker` runs the queue, and `app user`
+  administers accounts (passwords from stdin only).
+- **Placeholders until later phases:**
+  - Saving a derived series and rebuilding a series both return
+    `not_available` until the derive registry lands (P2-T3-01). There is no
+    silent bypass of derivation validation.
+  - No source has a fetch connector until Phase 5.
+- **Gate G1 tests:** `e2e/g1_test.go` has two:
+  - At service level.
+  - Over HTTP: login, a 403 without the CSRF token, then `POST /v1/datapoints`
+    → outbox → an event-triggered job → visible in the run tree.
+  - The stub subscriber lives only in the test.
+
+**Lead decisions on T1/T6 open items**
+
+- **`BLOB_SSE`:** a new config setting, required to be `true` outside
+  development.
+- **`make up`:** now creates the dev S3 bucket, and `make test` sets the
+  S3 test environment.
+- **Spec:** `413` and `415` are documented on all 26 operations with a body.
+- **`cascade_job`:** removed from the spec and the response. The cascade
+  starts asynchronously from the outbox, and its args carry the write's
+  `batch_id`.
+- **`auth.ClientInfo.RequestID`:** added (CONTRACT), so login audit rows
+  carry the request id.
+- **Flaky test fixed:** the API key tamper test sometimes reused the real
+  last character, so the "tampered" key was the real one. It was a test bug,
+  not an auth bug.
+- **Unknown methods:** they still return 404. That reveals nothing, and the
+  spec has no 405.
+- **Deferred to Phase 2 (T6):**
+  - `GET /v1/audit`: it needs a user lookup by UUID in `auth.Users`.
+
+**Not verified:** Docker on the dev machine has been hung since Phase 0, so
+every Postgres, River and S3 test is written but has never run, including
+G1. **G1 is not passed** until `make up && make test` is green.
+
 ## 2026-11-02 — T6 API: P1-T6-01, P1-T6-02, P1-T6-06
 
 **Done**
