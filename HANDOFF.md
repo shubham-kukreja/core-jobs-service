@@ -4,6 +4,49 @@ Shared log between the lead and teams. Newest entry first. Each entry says
 what's done, what's next, and any contract change. The plan is `docs/plan.md`
 and security rules are in `docs/security.md`.
 
+## 2026-11-02 — Phase 1, T2 Jobs (P1-T2-01 … 05)
+
+**Done.** All of this is in `internal/jobs`; River is imported only by
+`internal/jobs/river`.
+
+| Task | Output |
+| --- | --- |
+| P1-T2-01 | `GenerateArgsSchema` (reflect), filled into `Spec.ArgsSchema` at `Register`; `Kind.ValidateArgs`; `RawArgs` for JSON args (schedules, API) |
+| P1-T2-02 | `Service`, the `Enqueuer`: idempotency, `UniqueOpts`, `MaxPending` → `queue_full`, strict args; the `Engine` port; River adapter (`NewEngine`, `NewWorker`); `RunStore`, which implements `Runs` |
+| P1-T2-03 | `Executor`, the middleware chain from the plan; acceptance test: cancel stops a sleeping job in under 3 s |
+| P1-T2-04 | `Scheduler.Tick`: cron + interval `ScheduleTypes`, overlap and catch-up policies, templates, jitter; `ScheduleStore`, which implements `Schedules` |
+| P1-T2-05 | `Dispatcher` + `Subscribers`; `OutboxSource` port (wiring adapts `datapoints.Outbox`) |
+
+**Design**
+
+- **One River kind, `core.run`:** its args are `{run_id}`. Kind, args,
+  dedupe, idempotency and status live in `job_runs`.
+- **Infra jobs:** `scheduler.tick` (1 min) and `outbox.dispatch` (5 s) are
+  River periodic jobs that run on the leader only. They write no `job_runs`
+  rows.
+- **Dedupe and idempotency without schema changes:** a transaction advisory
+  lock, then a lookup. Idempotency also covers `user_id IS NULL` (schedule
+  slots use `schedule:<id>:<unix>`).
+- **Stored errors are safe:** an `apperr` message, or `timeout`, or a generic
+  `internal error`. Causes and panic stacks go to logs only.
+- **Shutdown:** an interrupted run is requeued with `Snooze(0)`, which does
+  not spend an attempt.
+- **Retry:** `POST /v1/jobs/{id}/retry` creates a child run (trigger
+  `system`), visible in the original's tree.
+
+**Not yet done**
+
+- **DB contract tests are unverified:** Docker was down, so
+  `internal/jobs/river/river_db_test.go` skipped. Run `make up && make test`.
+- **OpenTelemetry spans and per-connector rate limits:** they plug into the
+  `Executor` (P4) and the ingest queue (P5).
+- **`Spec.Concurrency`:** it sizes River `MaxWorkers` per process, not a
+  global cap.
+- **Calendar schedule types:** P2-T2-06 registers them via
+  `ScheduleTypes.Register`.
+
+**Contract changes:** none. `contract.go` is untouched.
+
 ## 2026-11-01 — Phase 0 (lead)
 
 **Done**
