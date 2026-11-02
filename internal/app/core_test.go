@@ -42,3 +42,22 @@ func TestDerivationsRejectedUntilPhase2(t *testing.T) {
 		t.Fatalf("want not_available, got %v", err)
 	}
 }
+
+func TestParsePrefixes(t *testing.T) {
+	got, err := parsePrefixes([]string{"10.0.0.7/8", "2001:db8::/32"})
+	if err != nil || len(got) != 2 || got[0].String() != "10.0.0.0/8" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if _, err := parsePrefixes([]string{"10.0.0.1"}); err == nil {
+		t.Fatal("a bare address must be rejected")
+	}
+}
+
+func TestRebuildsAndConnectorsUnavailable(t *testing.T) {
+	if _, err := (noRebuilds{}).EnqueueRebuild(context.Background(), nil, []string{"x"}, 1); !apperr.Is(err, apperr.NotAvailable) {
+		t.Fatalf("want not_available, got %v", err)
+	}
+	if _, ok := (noConnectors{}).Get("fred"); ok {
+		t.Fatal("no connectors exist yet")
+	}
+}
