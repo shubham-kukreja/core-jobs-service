@@ -44,10 +44,20 @@ func runAPI(ctx context.Context, stderr io.Writer) error {
 		return err
 	}
 	defer pool.Close()
+	core, err := app.NewCore(pool, log, clock.System{})
+	if err != nil {
+		return err
+	}
+	v1, err := core.NewAPI(cfg)
+	if err != nil {
+		return err
+	}
+	mux := healthMux(pool)
+	mux.Handle("/v1/", v1)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           healthMux(pool),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.HTTPReadTimeout,
 		WriteTimeout:      cfg.HTTPWriteTimeout,
@@ -87,7 +97,7 @@ func runWorker(ctx context.Context, stderr io.Writer) error {
 
 // healthMux serves liveness and readiness probes. They expose no details
 // beyond "ok"/"unavailable".
-func healthMux(pool *pgxpool.Pool) http.Handler {
+func healthMux(pool *pgxpool.Pool) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")

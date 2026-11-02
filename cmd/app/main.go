@@ -5,6 +5,7 @@
 //	app migrate up|status   apply schema migrations (owner role)
 //	app migrate down-all    revert everything (development/test only)
 //	app seed validate DIR   validate seed YAML against its JSON Schemas
+//	app user ...            create users, set passwords, issue API keys
 package main
 
 import (
@@ -25,6 +26,7 @@ commands:
   migrate up|status      apply schema migrations (uses MIGRATION_DATABASE_URL)
   migrate down-all       revert all migrations (development/test only)
   seed validate <dir>    validate seed files against configs/schema
+  user <subcommand>      manage users and API keys (run "app user" for help)
 `
 
 func main() { os.Exit(exitCode()) }
@@ -62,6 +64,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runMigrate(ctx, args[1:], stdout, stderr)
 	case "seed":
 		return runSeed(args[1:], stdout)
+	case "user":
+		return runUser(ctx, args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		_, err := fmt.Fprint(stdout, usage)
 		return err
