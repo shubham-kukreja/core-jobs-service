@@ -124,8 +124,8 @@ func parse(fs *flag.FlagSet, args []string) error {
 // readPassword reads without echo, twice, from a terminal; otherwise it
 // reads one line, so it can be piped from a secret manager.
 func readPassword(s IO) (string, error) {
-	if f, ok := s.Stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) { //nolint:gosec // fd fits in int.
-		fd := int(f.Fd()) //nolint:gosec // fd fits in int.
+	if f, ok := s.Stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		fd := int(f.Fd())
 		_, _ = fmt.Fprint(s.Stderr, "New password: ")
 		a, err := term.ReadPassword(fd)
 		_, _ = fmt.Fprintln(s.Stderr)

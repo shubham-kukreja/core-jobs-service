@@ -64,7 +64,9 @@ func loadSpec() error {
 	return spec.err
 }
 
-func ptrEscape(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, "~", "~0"), "/", "~1") }
+func ptrEscape(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "~", "~0"), "/", "~1")
+}
 
 func lookup(doc any, pointer string) (any, bool) {
 	cur := doc

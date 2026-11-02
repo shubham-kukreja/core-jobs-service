@@ -59,17 +59,22 @@ func withRequestID(next http.Handler) http.Handler {
 // recoverer turns panics into a generic 500; the stack goes to the log only.
 func (s *Server) recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if v := recover(); v != nil {
-				if v == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does.
-					panic(v)
-				}
-				s.log.ErrorContext(r.Context(), "panic", "request_id", requestIDFrom(r.Context()), "panic", v)
-				s.writeError(w, r, apperr.New(apperr.Internal, "Internal error"))
-			}
-		}()
+		defer s.recoverPanic(w, r)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// recoverPanic must be called directly by defer so recover() sees the panic.
+func (s *Server) recoverPanic(w http.ResponseWriter, r *http.Request) {
+	v := recover()
+	if v == nil {
+		return
+	}
+	if v == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does.
+		panic(v)
+	}
+	s.log.ErrorContext(r.Context(), "panic", "request_id", requestIDFrom(r.Context()), "panic", v)
+	s.writeError(w, r, apperr.New(apperr.Internal, "Internal error"))
 }
 
 // clientIP resolves the caller's address. X-Forwarded-For is honoured only

@@ -107,20 +107,20 @@ func TestSecurityHeaders(t *testing.T) {
 
 func TestCORS(t *testing.T) {
 	h := newHarness(t)
-	pre := func(origin string) *http.Response {
+	pre := func(origin string) (int, http.Header) {
 		rec := h.do(req{method: "OPTIONS", path: "/v1/entities", headers: map[string]string{
 			"Origin": origin, "Access-Control-Request-Method": "POST",
 		}})
-		return rec.Result()
+		return rec.Code, rec.Header()
 	}
-	ok := pre("https://core.arviawealth.com")
-	if ok.StatusCode != 204 || ok.Header.Get("Access-Control-Allow-Origin") != "https://core.arviawealth.com" ||
-		ok.Header.Get("Access-Control-Allow-Credentials") != "true" {
-		t.Fatalf("allowed preflight: %d %v", ok.StatusCode, ok.Header)
+	code, hdr := pre("https://core.arviawealth.com")
+	if code != http.StatusNoContent || hdr.Get("Access-Control-Allow-Origin") != "https://core.arviawealth.com" ||
+		hdr.Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("allowed preflight: %d %v", code, hdr)
 	}
-	bad := pre("https://evil.example")
-	if bad.StatusCode != 403 || bad.Header.Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("disallowed preflight: %d %v", bad.StatusCode, bad.Header)
+	code, hdr = pre("https://evil.example")
+	if code != http.StatusForbidden || hdr.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("disallowed preflight: %d %v", code, hdr)
 	}
 }
 
@@ -215,5 +215,9 @@ func extract(t *testing.T, s, start, end string) string {
 		t.Fatalf("%q not in %s", start, s)
 	}
 	s = s[i+len(start):]
-	return s[:strings.Index(s, end)]
+	j := strings.Index(s, end)
+	if j < 0 {
+		t.Fatalf("%q not in %s", end, s)
+	}
+	return s[:j]
 }

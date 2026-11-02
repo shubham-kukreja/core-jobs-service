@@ -122,8 +122,9 @@ func (s *Server) setSessionCookies(w http.ResponseWriter, token, csrf string, ex
 		Name: sessionCookie, Value: token, Path: "/", Domain: s.cfg.CookieDomain, Expires: expires,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
-	// Readable by the frontend, which echoes it in X-CSRF-Token.
-	http.SetCookie(w, &http.Cookie{
+	// Readable by the frontend, which echoes it in X-CSRF-Token; it is useless
+	// without the HttpOnly session cookie, which scripts cannot read.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly must be off so the frontend can read the CSRF token.
 		Name: csrfCookie, Value: csrf, Path: "/", Domain: s.cfg.CookieDomain, Expires: expires,
 		HttpOnly: false, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
@@ -133,7 +134,7 @@ func (s *Server) clearSessionCookies(w http.ResponseWriter) {
 	for _, name := range []string{sessionCookie, csrfCookie} {
 		http.SetCookie(w, &http.Cookie{
 			Name: name, Value: "", Path: "/", Domain: s.cfg.CookieDomain, MaxAge: -1,
-			HttpOnly: name == sessionCookie, Secure: true, SameSite: http.SameSiteStrictMode,
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 		})
 	}
 }

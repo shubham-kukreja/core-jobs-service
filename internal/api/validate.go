@@ -28,7 +28,9 @@ var (
 // problems collects validation details and turns them into one error.
 type problems []apperr.Detail
 
-func (p *problems) add(field, reason string) { *p = append(*p, apperr.Detail{Field: field, Reason: reason}) }
+func (p *problems) add(field, reason string) {
+	*p = append(*p, apperr.Detail{Field: field, Reason: reason})
+}
 
 func (p *problems) addAt(i int, field, reason string) {
 	idx := i

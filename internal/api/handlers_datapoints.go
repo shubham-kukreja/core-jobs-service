@@ -149,9 +149,9 @@ func (s *Server) writeDatapoints(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	s.mutate(w, r, body, func(tx pgx.Tx) (txResult, error) {
+	s.mutate(w, r, body, func(ctx context.Context, tx pgx.Tx) (txResult, error) {
 		uid := p.UserID
-		res, err := s.writer.Write(r.Context(), tx, datapoints.WriteMeta{
+		res, err := s.writer.Write(ctx, tx, datapoints.WriteMeta{
 			Source: in.Source, ActorID: &uid, Origin: datapoints.OriginPrimary,
 		}, pts)
 		if err != nil {
@@ -178,7 +178,7 @@ func (s *Server) writeDatapoints(w http.ResponseWriter, r *http.Request) {
 			"source": in.Source, "written": res.Written, "skipped": res.Skipped,
 			"rejected": len(res.Rejected), "series": dedupe(series),
 		}
-		if err := s.audit.Record(r.Context(), tx, auditEntry(r, "datapoint_batch", res.BatchID.String(), "write", nil, after)); err != nil {
+		if err := s.audit.Record(ctx, tx, auditEntry(r, "datapoint_batch", res.BatchID.String(), "write", nil, after)); err != nil {
 			return txResult{}, err
 		}
 		// The cascade is enqueued asynchronously by the outbox dispatcher, so
@@ -474,19 +474,19 @@ func (s *Server) retractDatapoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := mustPrincipal(r.Context())
-	s.mutate(w, r, body, func(tx pgx.Tx) (txResult, error) {
-		before, err := s.reader.Get(r.Context(), id)
+	s.mutate(w, r, body, func(ctx context.Context, tx pgx.Tx) (txResult, error) {
+		before, err := s.reader.Get(ctx, id)
 		if err != nil {
 			return txResult{}, err
 		}
 		uid := p.UserID
-		if err := s.writer.Retract(r.Context(), tx, datapoints.WriteMeta{
+		if err := s.writer.Retract(ctx, tx, datapoints.WriteMeta{
 			Source: catalog.SourceKeyAnalyst, ActorID: &uid, Origin: datapoints.OriginPrimary,
 		}, []int64{id}, in.Reason); err != nil {
 			return txResult{}, err
 		}
 		prev := map[string]any{"series": before.SeriesKey, "obs_date": before.ObsDate, "value": valueOut(before.Value), "source": before.Source}
-		if err := s.audit.Record(r.Context(), tx, auditEntry(r, "datapoint", strconv.FormatInt(id, 10), "retract", prev, map[string]any{"reason": in.Reason})); err != nil {
+		if err := s.audit.Record(ctx, tx, auditEntry(r, "datapoint", strconv.FormatInt(id, 10), "retract", prev, map[string]any{"reason": in.Reason})); err != nil {
 			return txResult{}, err
 		}
 		return txResult{Status: http.StatusOK, Body: map[string]any{"id": id, "status": "retracted"}}, nil

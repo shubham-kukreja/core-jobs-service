@@ -94,13 +94,13 @@ type txResult struct {
 // mutate runs fn in one transaction (the change plus its audit row). With an
 // Idempotency-Key header the response is stored in the same transaction and
 // replayed for retries; the same key with a different request is rejected.
-func (s *Server) mutate(w http.ResponseWriter, r *http.Request, body []byte, fn func(tx pgx.Tx) (txResult, error)) {
+func (s *Server) mutate(w http.ResponseWriter, r *http.Request, body []byte, fn func(ctx context.Context, tx pgx.Tx) (txResult, error)) {
 	key := r.Header.Get("Idempotency-Key")
 	if key == "" {
 		var res txResult
-		err := database.InTx(r.Context(), s.db, func(tx pgx.Tx) error {
+		err := inTx(r.Context(), s.db, func(ctx context.Context, tx pgx.Tx) error {
 			var err error
-			res, err = fn(tx)
+			res, err = fn(ctx, tx)
 			return err
 		})
 		if err != nil {
@@ -137,15 +137,15 @@ func (s *Server) mutate(w http.ResponseWriter, r *http.Request, body []byte, fn 
 
 	var res txResult
 	var encoded []byte
-	err = database.InTx(r.Context(), s.db, func(tx pgx.Tx) error {
+	err = inTx(r.Context(), s.db, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		if res, err = fn(tx); err != nil {
+		if res, err = fn(ctx, tx); err != nil {
 			return err
 		}
 		if encoded, err = json.Marshal(res.Body); err != nil {
 			return err
 		}
-		return s.idem.Put(r.Context(), tx, IdemRecord{
+		return s.idem.Put(ctx, tx, IdemRecord{
 			UserID: p.UserID, Key: key, Method: r.Method, Path: r.URL.Path, RequestHash: hash,
 			Status: res.Status, Body: encoded, Now: now, ExpiresAt: now.Add(IdempotencyTTL),
 		})
@@ -161,6 +161,11 @@ func (s *Server) mutate(w http.ResponseWriter, r *http.Request, body []byte, fn 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(res.Status)
 	_, _ = w.Write(append(encoded, '\n'))
+}
+
+// inTx is database.InTx with the context passed to fn explicitly.
+func inTx(ctx context.Context, db database.TxBeginner, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	return database.InTx(ctx, db, func(tx pgx.Tx) error { return fn(ctx, tx) })
 }
 
 // requestHash binds a key to method, path and body bytes.

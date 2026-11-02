@@ -223,7 +223,7 @@ func (h *harness) do(r req) *httptest.ResponseRecorder {
 	if r.body != "" {
 		body = strings.NewReader(r.body)
 	}
-	hr := httptest.NewRequest(r.method, "https://core.arviawealth.com"+r.path, body)
+	hr := httptest.NewRequestWithContext(h.t.Context(), r.method, "https://core.arviawealth.com"+r.path, body)
 	hr.RemoteAddr = "203.0.113.9:4444"
 	if r.peer != "" {
 		hr.RemoteAddr = r.peer

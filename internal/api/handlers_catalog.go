@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -191,19 +192,19 @@ func (s *Server) createEntity(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	s.mutate(w, r, body, func(tx pgx.Tx) (txResult, error) {
-		if _, err := s.catalog.Entity(r.Context(), in.Key); err == nil {
+	s.mutate(w, r, body, func(ctx context.Context, tx pgx.Tx) (txResult, error) {
+		if _, err := s.catalog.Entity(ctx, in.Key); err == nil {
 			return txResult{}, apperr.New(apperr.Conflict, "An entity with this key already exists")
 		} else if !errors.Is(err, catalog.ErrNotFound) {
 			return txResult{}, err
 		}
-		e, err := s.catalog.SaveEntity(r.Context(), tx, catalog.Entity{
+		e, err := s.catalog.SaveEntity(ctx, tx, catalog.Entity{
 			Key: in.Key, Kind: in.Kind, Name: in.Name, ParentKey: in.Parent, Meta: in.Meta, Active: true,
 		})
 		if err != nil {
 			return txResult{}, err
 		}
-		if err := s.audit.Record(r.Context(), tx, auditEntry(r, "entity", e.Key, "create", nil, toEntityJSON(e))); err != nil {
+		if err := s.audit.Record(ctx, tx, auditEntry(r, "entity", e.Key, "create", nil, toEntityJSON(e))); err != nil {
 			return txResult{}, err
 		}
 		return txResult{Status: http.StatusCreated, Body: toEntityJSON(e)}, nil
@@ -252,8 +253,8 @@ func (s *Server) updateEntity(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	s.mutate(w, r, body, func(tx pgx.Tx) (txResult, error) {
-		before, err := s.catalog.Entity(r.Context(), key)
+	s.mutate(w, r, body, func(ctx context.Context, tx pgx.Tx) (txResult, error) {
+		before, err := s.catalog.Entity(ctx, key)
 		if err != nil {
 			return txResult{}, err
 		}
@@ -273,11 +274,11 @@ func (s *Server) updateEntity(w http.ResponseWriter, r *http.Request) {
 		if in.Active != nil {
 			next.Active = *in.Active
 		}
-		saved, err := s.catalog.SaveEntity(r.Context(), tx, next)
+		saved, err := s.catalog.SaveEntity(ctx, tx, next)
 		if err != nil {
 			return txResult{}, err
 		}
-		if err := s.audit.Record(r.Context(), tx, auditEntry(r, "entity", key, "update", toEntityJSON(before), toEntityJSON(saved))); err != nil {
+		if err := s.audit.Record(ctx, tx, auditEntry(r, "entity", key, "update", toEntityJSON(before), toEntityJSON(saved))); err != nil {
 			return txResult{}, err
 		}
 		return txResult{Status: http.StatusOK, Body: toEntityJSON(saved)}, nil
@@ -586,13 +587,13 @@ func (s *Server) createSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	si := catalog.SeriesInput{Key: in.Key, Layer: catalog.Layer(in.Layer), ValueType: catalog.ValueType(in.ValueType)}
 	in.apply(&si)
-	s.mutate(w, r, body, func(tx pgx.Tx) (txResult, error) {
-		if _, err := s.catalog.Series(r.Context(), in.Key); err == nil {
+	s.mutate(w, r, body, func(ctx context.Context, tx pgx.Tx) (txResult, error) {
+		if _, err := s.catalog.Series(ctx, in.Key); err == nil {
 			return txResult{}, apperr.New(apperr.Conflict, "A series with this key already exists")
 		} else if !errors.Is(err, catalog.ErrNotFound) {
 			return txResult{}, err
 		}
-		return s.saveSeries(r, tx, si, nil, "create", http.StatusCreated)
+		return s.saveSeries(ctx, r, tx, si, nil, "create", http.StatusCreated)
 	})
 }
 
@@ -618,27 +619,27 @@ func (s *Server) updateSeries(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	s.mutate(w, r, body, func(tx pgx.Tx) (txResult, error) {
-		cur, err := s.catalog.Series(r.Context(), key)
+	s.mutate(w, r, body, func(ctx context.Context, tx pgx.Tx) (txResult, error) {
+		cur, err := s.catalog.Series(ctx, key)
 		if err != nil {
 			return txResult{}, err
 		}
 		si := seriesInputFrom(cur)
 		in.apply(&si)
 		if in.Active != nil {
-			if err := s.catalog.SetSeriesActive(r.Context(), tx, key, *in.Active); err != nil {
+			if err := s.catalog.SetSeriesActive(ctx, tx, key, *in.Active); err != nil {
 				return txResult{}, err
 			}
 		}
-		return s.saveSeries(r, tx, si, &cur, "update", http.StatusOK)
+		return s.saveSeries(ctx, r, tx, si, &cur, "update", http.StatusOK)
 	})
 }
 
 // saveSeries saves, enqueues a history rebuild when the derivation changed,
 // and audits, all in tx.
-func (s *Server) saveSeries(r *http.Request, tx pgx.Tx, si catalog.SeriesInput, before *catalog.Series, action string, status int) (txResult, error) {
-	p := mustPrincipal(r.Context())
-	res, err := s.catalog.SaveSeries(r.Context(), tx, si)
+func (s *Server) saveSeries(ctx context.Context, r *http.Request, tx pgx.Tx, si catalog.SeriesInput, before *catalog.Series, action string, status int) (txResult, error) {
+	p := mustPrincipal(ctx)
+	res, err := s.catalog.SaveSeries(ctx, tx, si)
 	if err != nil {
 		return txResult{}, err
 	}
@@ -654,7 +655,7 @@ func (s *Server) saveSeries(r *http.Request, tx pgx.Tx, si catalog.SeriesInput, 
 	}
 	if res.Rebuild {
 		keys := []string{res.Series.Key}
-		ref, err := s.rebuilds.EnqueueRebuild(r.Context(), tx, keys, p.UserID)
+		ref, err := s.rebuilds.EnqueueRebuild(ctx, tx, keys, p.UserID)
 		if err != nil {
 			return txResult{}, err
 		}
@@ -667,7 +668,7 @@ func (s *Server) saveSeries(r *http.Request, tx pgx.Tx, si catalog.SeriesInput, 
 	if before != nil {
 		prev = toSeriesJSON(*before)
 	}
-	if err := s.audit.Record(r.Context(), tx, auditEntry(r, "series", res.Series.Key, action, prev, toSeriesJSON(res.Series))); err != nil {
+	if err := s.audit.Record(ctx, tx, auditEntry(r, "series", res.Series.Key, action, prev, toSeriesJSON(res.Series))); err != nil {
 		return txResult{}, err
 	}
 	return txResult{Status: status, Body: out}, nil

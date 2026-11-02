@@ -30,24 +30,27 @@ func loginOK(f *fakeAuth, failures map[string]int) {
 	}
 }
 
-func login(h *harness, email, pw string, extra ...func(*req)) *http.Response {
+// login returns the status code and cookies of a login attempt.
+func login(h *harness, email, pw string, extra ...func(*req)) (int, []*http.Cookie) {
 	h.t.Helper()
 	r := req{method: "POST", path: "/v1/auth/login", op: "/v1/auth/login", body: `{"email":"` + email + `","password":"` + pw + `"}`}
 	for _, e := range extra {
 		e(&r)
 	}
-	return h.do(r).Result()
+	res := h.do(r).Result()
+	defer func() { _ = res.Body.Close() }()
+	return res.StatusCode, res.Cookies()
 }
 
 func TestLoginSetsHardenedCookies(t *testing.T) {
 	h := newHarness(t)
 	loginOK(h.auth, nil)
-	res := login(h, analystUser.Email, "right-password")
-	if res.StatusCode != 200 {
-		t.Fatalf("status %d", res.StatusCode)
+	status, got := login(h, analystUser.Email, "right-password")
+	if status != http.StatusOK {
+		t.Fatalf("status %d", status)
 	}
 	cookies := map[string]*http.Cookie{}
-	for _, c := range res.Cookies() {
+	for _, c := range got {
 		cookies[c.Name] = c
 	}
 	s, c := cookies[sessionCookie], cookies[csrfCookie]
@@ -74,7 +77,12 @@ func TestLoginFailuresAreUniform(t *testing.T) {
 	wrong := h.do(req{method: "POST", path: "/v1/auth/login", op: "/v1/auth/login", body: `{"email":"riya@arviawealth.com","password":"nope"}`})
 	unknown := h.do(req{method: "POST", path: "/v1/auth/login", op: "/v1/auth/login", body: `{"email":"ghost@arviawealth.com","password":"nope"}`})
 	locked := h.do(req{method: "POST", path: "/v1/auth/login", op: "/v1/auth/login", body: `{"email":"locked@arviawealth.com","password":"nope"}`})
-	strip := func(s string) string { return s[:strings.Index(s, `"request_id"`)] }
+	strip := func(s string) string {
+		if i := strings.Index(s, `"request_id"`); i >= 0 {
+			return s[:i]
+		}
+		return s
+	}
 	if wrong.Code != 401 || unknown.Code != 401 || locked.Code != 401 ||
 		strip(wrong.Body.String()) != strip(unknown.Body.String()) || strip(unknown.Body.String()) != strip(locked.Body.String()) {
 		t.Fatalf("responses differ:\n%s\n%s\n%s", wrong.Body, unknown.Body, locked.Body)
@@ -87,21 +95,21 @@ func TestLoginRateLimitDoesNotRevealAccounts(t *testing.T) {
 	// Existing and unknown emails reach 429 after the same number of failures.
 	for _, email := range []string{"riya@arviawealth.com", "ghost@arviawealth.com"} {
 		for i := range 4 {
-			if res := login(h, email, "nope", fromIP(i)); res.StatusCode != 401 {
-				t.Fatalf("%s attempt %d: %d", email, i, res.StatusCode)
+			if status, _ := login(h, email, "nope", fromIP(i)); status != 401 {
+				t.Fatalf("%s attempt %d: %d", email, i, status)
 			}
 		}
-		if res := login(h, email, "nope", fromIP(9)); res.StatusCode != 429 {
-			t.Fatalf("%s: 5th failure should be 429, got %d", email, res.StatusCode)
+		if status, _ := login(h, email, "nope", fromIP(9)); status != 429 {
+			t.Fatalf("%s: 5th failure should be 429, got %d", email, status)
 		}
 		// Blocked even with the right password until the window passes.
-		if res := login(h, email, "right-password", fromIP(8)); res.StatusCode != 429 {
-			t.Fatalf("%s: blocked email should stay 429, got %d", email, res.StatusCode)
+		if status, _ := login(h, email, "right-password", fromIP(8)); status != 429 {
+			t.Fatalf("%s: blocked email should stay 429, got %d", email, status)
 		}
 	}
 	h.clock.Advance(16 * time.Minute)
-	if res := login(h, "riya@arviawealth.com", "right-password", fromIP(7)); res.StatusCode != 200 {
-		t.Fatalf("after window: %d", res.StatusCode)
+	if status, _ := login(h, "riya@arviawealth.com", "right-password", fromIP(7)); status != 200 {
+		t.Fatalf("after window: %d", status)
 	}
 }
 
@@ -109,12 +117,12 @@ func TestLoginPerIPLimit(t *testing.T) {
 	h := newHarness(t, func(c *Config, _ *Deps) { c.LoginIPRate = Rate{Burst: 3, Per: time.Minute} })
 	loginOK(h.auth, nil)
 	for i := range 3 {
-		if res := login(h, "user"+string(rune('a'+i))+"@x.co", "nope"); res.StatusCode != 401 {
-			t.Fatalf("attempt %d: %d", i, res.StatusCode)
+		if status, _ := login(h, "user"+string(rune('a'+i))+"@x.co", "nope"); status != 401 {
+			t.Fatalf("attempt %d: %d", i, status)
 		}
 	}
-	if res := login(h, "other@x.co", "nope"); res.StatusCode != 429 {
-		t.Fatalf("per-IP limit: %d", res.StatusCode)
+	if status, _ := login(h, "other@x.co", "nope"); status != 429 {
+		t.Fatalf("per-IP limit: %d", status)
 	}
 }
 
@@ -143,7 +151,9 @@ func TestLogout(t *testing.T) {
 	if len(h.auth.logouts) != 1 {
 		t.Fatal("session not revoked")
 	}
-	for _, c := range rec.Result().Cookies() {
+	res := rec.Result()
+	defer func() { _ = res.Body.Close() }()
+	for _, c := range res.Cookies() {
 		if c.MaxAge >= 0 {
 			t.Fatalf("cookie %s not cleared", c.Name)
 		}

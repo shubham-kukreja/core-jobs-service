@@ -23,8 +23,10 @@ type fakeHasher struct {
 
 const fakeDummy = "$argon2id$dummy"
 
-func (f *fakeHasher) Hash(_ context.Context, pw string) (string, error) { return "$argon2id$" + pw, nil }
-func (f *fakeHasher) Dummy() string                                    { return fakeDummy }
+func (f *fakeHasher) Hash(_ context.Context, pw string) (string, error) {
+	return "$argon2id$" + pw, nil
+}
+func (f *fakeHasher) Dummy() string { return fakeDummy }
 func (f *fakeHasher) Verify(_ context.Context, pw, phc string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -34,7 +36,6 @@ func (f *fakeHasher) Verify(_ context.Context, pw, phc string) (bool, error) {
 
 // memStore is an in-memory store.
 type memStore struct {
-	mu       sync.Mutex
 	users    map[string]*loginUser // by email
 	sessions map[string]*sessionUser
 	keys     map[string]*apiKeyUser
