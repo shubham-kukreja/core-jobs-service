@@ -47,9 +47,28 @@ and security rules are in `docs/security.md`.
 - **Deferred to Phase 2 (T6):**
   - `GET /v1/audit`: it needs a user lookup by UUID in `auth.Users`.
 
-**Not verified:** Docker on the dev machine has been hung since Phase 0, so
-every Postgres, River and S3 test is written but has never run, including
-G1. **G1 is not passed** until `make up && make test` is green.
+**Gate G1: passed on 2026-11-02.** `make up && make test` is green with
+`-race` against real Postgres 16, River and S3 (SeaweedFS), with no test
+skipped.
+
+- **Smoke test of the real binaries** (`app api`, `app worker`, `app user`):
+  - login 200, and 401 for a wrong password
+  - a write without CSRF gets 403, and an analyst `override` gets 403
+  - a write with CSRF gets 201 and reads back point-in-time
+  - the worker drained the outbox
+  - no errors, and no secrets in the logs
+- **Bugs the first real run found and fixed:**
+  - Retractions always failed: pgx could not encode the advisory-lock
+    parameter.
+  - `History` windows included one month too many at month ends.
+  - `$prev_month_end` returned the current month end on the 29th–31st, from
+    `AddMonths` overflow normalisation.
+  - New `internal/platform/calendar` does clamped month arithmetic. Use it for
+    every look-back window (derive in Phase 2).
+
+**Coverage gaps (to close in Phase 2):** measured across packages, `jobs` is
+at about 77% and `auth` at about 76%, below the 80% bar; `admincli` is at
+67% from its own tests. Every other new package is at 80% or above.
 
 ## 2026-11-02 — T6 API: P1-T6-01, P1-T6-02, P1-T6-06
 
