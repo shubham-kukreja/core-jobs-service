@@ -403,7 +403,12 @@ func TestAPIKeys(t *testing.T) {
 	if err != nil || p.Kind != PrincipalAPIKey || len(p.CSRFHash) != 0 {
 		t.Fatalf("%+v %v", p, err)
 	}
-	if _, err := s.APIKey(ctx, key[:len(key)-1]+"A"); !errors.Is(err, ErrSessionInvalid) {
+	// Change the last character to a different one (it may already be 'A').
+	last := "A"
+	if strings.HasSuffix(key, "A") {
+		last = "B"
+	}
+	if _, err := s.APIKey(ctx, key[:len(key)-1]+last); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatal("tampered key accepted")
 	}
 	c.Advance(time.Hour)
