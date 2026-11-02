@@ -118,6 +118,8 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/auth/logout:
     post:
       tags: [Auth]
@@ -208,6 +210,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/entities/{key}:
     parameters:
       - $ref: '#/components/parameters/EntityKey'
@@ -234,6 +238,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/series:
     get:
       tags: [Catalog]
@@ -306,6 +312,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/series/{key}:
     parameters:
       - $ref: '#/components/parameters/SeriesKey'
@@ -349,6 +357,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/series/{key}/deps:
     parameters:
       - $ref: '#/components/parameters/SeriesKey'
@@ -539,6 +549,7 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/Internal'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/series/{key}/datapoints:
     parameters:
       - $ref: '#/components/parameters/SeriesKey'
@@ -684,6 +695,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/snapshot:
     post:
       tags: [Datapoints]
@@ -714,6 +727,8 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
 
   # ---------------------------------------------------------------- Imports
   /v1/uploads:
@@ -817,6 +832,8 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
 
   # ---------------------------------------------------------------- Jobs
   /v1/job-kinds:
@@ -923,6 +940,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/jobs/{id}:
     parameters:
       - $ref: '#/components/parameters/JobId'
@@ -1121,6 +1140,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/schedules/{id}:
     parameters:
       - $ref: '#/components/parameters/ScheduleId'
@@ -1147,6 +1168,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/schedules/{id}/run-now:
     parameters:
       - $ref: '#/components/parameters/ScheduleId'
@@ -1283,6 +1306,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/models/{model}/configs/diff:
     parameters:
       - $ref: '#/components/parameters/ModelKey'
@@ -1400,6 +1425,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/models/{model}/overrides/{id}:
     parameters:
       - $ref: '#/components/parameters/ModelKey'
@@ -1617,6 +1644,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/runs/{id}/publish:
     parameters:
       - $ref: '#/components/parameters/RunId'
@@ -1717,6 +1746,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/risk-profiles/{key}:
     parameters:
       - $ref: '#/components/parameters/RiskProfileKey'
@@ -1757,6 +1788,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/quality/report:
     get:
       tags: [Workspace]
@@ -1919,6 +1952,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/draft/evaluate:
     post:
       tags: [Draft]
@@ -1956,6 +1991,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/draft/reset:
     post:
       tags: [Draft]
@@ -2033,6 +2070,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
 
   # ---------------------------------------------------------------- Signals
   /v1/signals:
@@ -2133,6 +2172,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
 
   # ---------------------------------------------------------------- Versions
   /v1/versions:
@@ -2192,6 +2233,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/versions/compare:
     get:
       tags: [Versions]
@@ -2309,6 +2352,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
 
   # ---------------------------------------------------------------- Backtests
   /v1/funds/search:
@@ -2427,6 +2472,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/Internal'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/backtests/{id}:
     parameters:
       - $ref: '#/components/parameters/BacktestId'
@@ -2559,6 +2606,7 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
         '500': {$ref: '#/components/responses/Internal'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
   /v1/notes/{id}:
     parameters:
       - $ref: '#/components/parameters/NoteId'
@@ -2601,6 +2649,7 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
         '500': {$ref: '#/components/responses/Internal'}
+        '415': {$ref: '#/components/responses/UnsupportedMedia'}
     delete:
       tags: [Notes]
       operationId: deleteNote
