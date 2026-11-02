@@ -561,7 +561,8 @@ func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Strings(missing)
-	writeJSON(w, http.StatusOK, map[string]any{"as_of": asOf, "values": values, "missing": dedupe(missing)})
+	missing = append([]string{}, dedupe(missing)...)
+	writeJSON(w, http.StatusOK, map[string]any{"as_of": asOf, "values": values, "missing": missing})
 }
 
 // expandSeries resolves exact keys and trailing-* patterns to known series.
