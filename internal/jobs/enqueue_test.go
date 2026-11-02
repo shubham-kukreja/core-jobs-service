@@ -68,7 +68,8 @@ func TestSameJSON(t *testing.T) {
 }
 
 func TestLockKeyStable(t *testing.T) {
-	if lockKey("a", "b") != lockKey("a", "b") || lockKey("a", "b") == lockKey("ab") {
+	first, again := lockKey("a", "b"), lockKey("a", "b")
+	if first != again || first == lockKey("ab") {
 		t.Fatal("lock keys must be stable and separator-aware")
 	}
 }

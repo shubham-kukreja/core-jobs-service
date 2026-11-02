@@ -51,7 +51,7 @@ func TestDueSlotsAndCatchup(t *testing.T) {
 	fc := clock.NewFake(time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC))
 	first := fc.Now().Add(-5*time.Hour - 30*time.Minute) // missed hourly slots
 
-	due, next, err := dueSlots(IntervalType{}, "1h", first, fc.Now(), ist, MaxCatchup)
+	due, next, err := dueSlots(IntervalType{}, "1h", first, fc.Now(), ist)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestDueSlotsAndCatchup(t *testing.T) {
 
 func TestCatchupAllIsCapped(t *testing.T) {
 	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	due, _, err := dueSlots(IntervalType{}, "1m", now.Add(-1000*time.Minute), now, ist, MaxCatchup)
+	due, _, err := dueSlots(IntervalType{}, "1m", now.Add(-1000*time.Minute), now, ist)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,16 +91,16 @@ func TestCatchupAllIsCapped(t *testing.T) {
 func TestNoDoubleFire(t *testing.T) {
 	fc := clock.NewFake(time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC))
 	first := fc.Now()
-	due, next, err := dueSlots(CronType{}, "30 8 * * *", first, fc.Now(), ist, MaxCatchup)
+	due, next, err := dueSlots(CronType{}, "30 8 * * *", first, fc.Now(), ist)
 	if err != nil || len(due) != 1 {
 		t.Fatalf("first tick: due=%v err=%v", due, err)
 	}
-	again, _, _ := dueSlots(CronType{}, "30 8 * * *", next, fc.Now(), ist, MaxCatchup)
+	again, _, _ := dueSlots(CronType{}, "30 8 * * *", next, fc.Now(), ist)
 	if len(again) != 0 {
 		t.Fatalf("second tick fired again: %v", again)
 	}
 	fc.Advance(24 * time.Hour)
-	later, _, _ := dueSlots(CronType{}, "30 8 * * *", next, fc.Now(), ist, MaxCatchup)
+	later, _, _ := dueSlots(CronType{}, "30 8 * * *", next, fc.Now(), ist)
 	if len(later) != 1 || !later[0].Equal(next) {
 		t.Fatalf("next day: %v", later)
 	}

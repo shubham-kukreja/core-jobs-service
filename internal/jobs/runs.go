@@ -104,7 +104,7 @@ func (s *RunStore) Tree(ctx context.Context, id uuid.UUID, maxDepth int) (RunTre
 	if err != nil {
 		return RunTree{}, err
 	}
-	rows, err := q.RunTree(ctx, db.RunTreeParams{RootID: root.ID, MaxDepth: int32(maxDepth)}) //nolint:gosec // ≤ MaxTreeDepth.
+	rows, err := q.RunTree(ctx, db.RunTreeParams{RootID: root.ID, MaxDepth: int32(maxDepth)})
 	if err != nil {
 		return RunTree{}, err
 	}

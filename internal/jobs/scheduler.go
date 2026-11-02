@@ -108,7 +108,7 @@ func (s *Scheduler) fire(ctx context.Context, tx pgx.Tx, row db.JobsJobSchedule,
 	if err != nil {
 		return 0, fmt.Errorf("timezone: %w", err)
 	}
-	due, next, err := dueSlots(typ, row.Expr, row.NextRunAt, now, loc, MaxCatchup)
+	due, next, err := dueSlots(typ, row.Expr, row.NextRunAt, now, loc)
 	if err != nil {
 		return 0, err
 	}
@@ -168,16 +168,16 @@ func (s *Scheduler) backoff(ctx context.Context, tx pgx.Tx, row db.JobsJobSchedu
 	return db.New(tx).AdvanceSchedule(ctx, db.AdvanceScheduleParams{ID: row.ID, NextRunAt: now.Add(time.Hour)})
 }
 
-// dueSlots returns the slots at or before now (at most limit, most recent
-// kept), starting from first, and the first slot after now.
-func dueSlots(typ ScheduleType, expr string, first, now time.Time, loc *time.Location, limit int) (due []time.Time, next time.Time, err error) {
+// dueSlots returns the slots at or before now (at most MaxCatchup, most
+// recent kept), starting from first, and the first slot after now.
+func dueSlots(typ ScheduleType, expr string, first, now time.Time, loc *time.Location) (due []time.Time, next time.Time, err error) {
 	slot := first
 	for range maxSlotScan {
 		if slot.After(now) {
 			return due, slot, nil
 		}
 		due = append(due, slot)
-		if len(due) > limit {
+		if len(due) > MaxCatchup {
 			due = due[1:]
 		}
 		if slot, err = typ.Next(expr, slot, loc); err != nil {

@@ -123,7 +123,7 @@ func (e *Executor) Execute(ctx context.Context, ex Execution) error {
 	stopWatch := e.watchCancel(runCtx, run.ID, cancel, log)
 	defer stopWatch()
 
-	progress := e.newProgress(run.ID, log)
+	progress := e.newProgress(ctx, run.ID, log)
 	rc := &RunCtx{
 		RunID:     run.ID,
 		RunUUID:   run.UUID,
@@ -259,8 +259,9 @@ func (e *Executor) watchCancel(ctx context.Context, runID int64, cancel context.
 }
 
 // newProgress returns a throttled progress reporter: at most one write per
-// ProgressInterval, except 100% which is always written.
-func (e *Executor) newProgress(runID int64, log *slog.Logger) func(int, string) {
+// ProgressInterval, except 100% which is always written. Writes use the
+// attempt's context (not the run's), so they still land while cancelling.
+func (e *Executor) newProgress(ctx context.Context, runID int64, log *slog.Logger) func(int, string) {
 	var (
 		mu   sync.Mutex
 		last time.Time
@@ -278,7 +279,7 @@ func (e *Executor) newProgress(runID int64, log *slog.Logger) func(int, string) 
 		}
 		last = now
 		mu.Unlock()
-		if err := e.store.progress(context.Background(), runID, pct, msg); err != nil {
+		if err := e.store.progress(ctx, runID, pct, msg); err != nil {
 			log.Warn("progress write failed", "err", err)
 		}
 	}

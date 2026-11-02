@@ -20,7 +20,7 @@ type schemaArgs struct {
 	Ratio  float64           `json:"ratio,omitempty"`
 	Pub    bool              `json:"publish"`
 	Hidden string            `json:"-"`
-	inner  int
+	inner  int               //nolint:unused // verifies unexported fields are skipped.
 }
 
 func (schemaArgs) Kind() string { return "test.schema" }
