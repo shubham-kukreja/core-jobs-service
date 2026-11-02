@@ -519,7 +519,9 @@ paths:
         `source` is `analyst` or `override` (override requires admin). Values are typed by the
         series: number, boolean or an allowed category. Invalid points are returned in
         `rejected` and do not fail the batch; if every point is rejected the response is
-        `400 validation_failed` with one detail per point.
+        `400 validation_failed` with one detail per point. Recomputing downstream series
+        (`derive.cascade`) starts asynchronously from the write's outbox event, so no job id
+        is returned; the run's args carry this `batch_id`.
       x-required-role: analyst
       security: *unsafe
       parameters:
@@ -541,7 +543,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/WriteResult'}
-              example: {batch_id: 5b0e8c1a-2d3f-4e5a-8b6c-7d8e9f0a1b2c, written: 3, skipped: 0, rejected: [], cascade_job: {id: c91f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a4b, kind: derive.cascade, status: queued}}
+              example: {batch_id: 5b0e8c1a-2d3f-4e5a-8b6c-7d8e9f0a1b2c, written: 3, skipped: 0, rejected: []}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -688,7 +690,6 @@ paths:
                 properties:
                   id: {type: integer, format: int64}
                   status: {type: string, const: retracted}
-                  cascade_job: {$ref: '#/components/schemas/JobRef'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -3333,7 +3334,6 @@ components:
         written: {type: integer, minimum: 0}
         skipped: {type: integer, minimum: 0}
         rejected: {type: array, items: {$ref: '#/components/schemas/Rejection'}}
-        cascade_job: {anyOf: [{$ref: '#/components/schemas/JobRef'}, {type: 'null'}]}
     ResolvedPoint:
       type: object
       required: [obs_date, value]

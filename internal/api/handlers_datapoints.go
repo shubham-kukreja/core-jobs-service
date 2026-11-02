@@ -62,11 +62,10 @@ type rejectionJSON struct {
 }
 
 type writeResultJSON struct {
-	BatchID    uuid.UUID       `json:"batch_id"`
-	Written    int             `json:"written"`
-	Skipped    int             `json:"skipped"`
-	Rejected   []rejectionJSON `json:"rejected"`
-	CascadeJob *jobRefJSON     `json:"cascade_job"`
+	BatchID  uuid.UUID       `json:"batch_id"`
+	Written  int             `json:"written"`
+	Skipped  int             `json:"skipped"`
+	Rejected []rejectionJSON `json:"rejected"`
 }
 
 // parseValue accepts a JSON number, boolean or string; the writer checks it
