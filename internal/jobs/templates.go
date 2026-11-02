@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/civil"
+
+	"github.com/shubham-kukreja/core-jobs-service/internal/platform/calendar"
 )
 
 // ResolveArgTemplates replaces template strings in schedule args with dates
@@ -44,9 +46,9 @@ func resolveValue(v any, d civil.Date) (any, error) {
 		case "$today", "$slot":
 			return d.String(), nil
 		case "$month_end":
-			return monthEnd(d).String(), nil
+			return calendar.MonthEnd(d).String(), nil
 		case "$prev_month_end":
-			return monthEnd(d.AddMonths(-1)).String(), nil
+			return calendar.MonthEnd(calendar.AddMonths(d, -1)).String(), nil
 		}
 		return nil, fmt.Errorf("schedule args: unknown template %q", x)
 	case map[string]any:
@@ -70,9 +72,4 @@ func resolveValue(v any, d civil.Date) (any, error) {
 	default:
 		return v, nil
 	}
-}
-
-func monthEnd(d civil.Date) civil.Date {
-	first := civil.Date{Year: d.Year, Month: d.Month, Day: 1}
-	return first.AddMonths(1).AddDays(-1)
 }

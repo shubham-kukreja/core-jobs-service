@@ -153,3 +153,24 @@ func TestScheduleTypesRegistry(t *testing.T) {
 	}()
 	r.Register(IntervalType{})
 }
+
+// TestPrevMonthEndOnLongMonthDays guards the month-overflow bug: on 31 Mar,
+// "one month back" must be February, not 3 Mar after normalisation.
+func TestPrevMonthEndOnLongMonthDays(t *testing.T) {
+	for slot, want := range map[time.Time]string{
+		time.Date(2026, 3, 31, 6, 0, 0, 0, time.UTC): "2026-02-28",
+		time.Date(2024, 3, 30, 6, 0, 0, 0, time.UTC): "2024-02-29",
+		time.Date(2026, 5, 31, 6, 0, 0, 0, time.UTC): "2026-04-30",
+		time.Date(2026, 1, 31, 6, 0, 0, 0, time.UTC): "2025-12-31",
+	} {
+		got, err := ResolveArgTemplates(json.RawMessage(`{"as_of":"$prev_month_end"}`), slot, ist)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]string
+		_ = json.Unmarshal(got, &m)
+		if m["as_of"] != want {
+			t.Errorf("%s: prev_month_end = %s, want %s", slot.Format(time.DateOnly), m["as_of"], want)
+		}
+	}
+}
