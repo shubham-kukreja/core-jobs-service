@@ -210,3 +210,31 @@ func TestRegistryValidateDerivation(t *testing.T) {
 	}()
 	r.Register(invert{})
 }
+
+func TestRegistryNamesAndCascadeModes(t *testing.T) {
+	if n := len(NewDefaultRegistry().Names()); n != 14 {
+		t.Fatalf("got %d primitives, want 14", n)
+	}
+	c := NewCascade(CascadeDeps{})
+	if _, err := c.Run(context.Background(), CascadeRequest{Mode: "bogus"}, 0, nil); !errors.Is(err, ErrInvalidParams) {
+		t.Fatalf("bogus mode: %v", err)
+	}
+	if _, err := c.Run(context.Background(), CascadeRequest{Mode: ModeRebuild}, 0, nil); !errors.Is(err, ErrInvalidParams) {
+		t.Fatalf("rebuild without keys: %v", err)
+	}
+}
+
+func TestPlanRangesExtendsWindowedSeries(t *testing.T) {
+	reg := NewDefaultRegistry()
+	down := []catalog.Series{
+		{Key: "gap", Active: true, Derivation: &catalog.Derivation{Fn: "expr", Inputs: map[string]string{"a": "raw"}}},
+		{Key: "pct", Active: true, Derivation: &catalog.Derivation{Fn: "percentile_rank", Inputs: map[string]string{"x": "gap"},
+			Params: json.RawMessage(`{"window_months":3}`)}},
+		{Key: "off", Active: false, Derivation: &catalog.Derivation{Fn: "invert", Inputs: map[string]string{"x": "pct"}}},
+	}
+	ev := datapoints.WrittenEvent{MinDate: me(2026, 1), MaxDate: me(2026, 1)}
+	items := planRanges(reg, ev, down, me(2026, 3))
+	if len(items) != 2 || items[0].to != me(2026, 1) || items[1].to != me(2026, 3) {
+		t.Fatalf("got %+v", items)
+	}
+}
