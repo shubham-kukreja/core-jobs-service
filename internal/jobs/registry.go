@@ -139,3 +139,17 @@ func (a RawArgs) MarshalJSON() ([]byte, error) {
 	}
 	return a.JSON, nil
 }
+
+// Decode strictly decodes raw into the kind's Args, for enqueuing args that
+// arrive as JSON (API submits).
+func (k Kind) Decode(raw json.RawMessage) (Args, error) {
+	p := k.newArgs()
+	if err := strictDecode(raw, p, k.Spec.Kind); err != nil {
+		return nil, err
+	}
+	a, ok := reflect.ValueOf(p).Elem().Interface().(Args)
+	if !ok {
+		return nil, fmt.Errorf("jobs: %s args do not implement Args", k.Spec.Kind)
+	}
+	return a, nil
+}

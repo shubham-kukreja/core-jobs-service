@@ -285,3 +285,25 @@ func toJobRun(r db.JobsJobRun) (JobRun, error) {
 	}
 	return jr, nil
 }
+
+// UUIDs maps internal run ids (parent, root, last run) to their public UUIDs.
+func (s *RunStore) UUIDs(ctx context.Context, ids []int64) (map[int64]uuid.UUID, error) {
+	out := make(map[int64]uuid.UUID, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, uuid FROM jobs.job_runs WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: run uuids: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var u uuid.UUID
+		if err := rows.Scan(&id, &u); err != nil {
+			return nil, fmt.Errorf("jobs: run uuids: %w", err)
+		}
+		out[id] = u
+	}
+	return out, rows.Err()
+}
