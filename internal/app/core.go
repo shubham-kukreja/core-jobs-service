@@ -48,6 +48,8 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 	}
 	reg := jobs.NewRegistry()
 	types := jobs.DefaultScheduleTypes()
+	// Review dates come from the active model config once Phase 3 lands.
+	types.Register(jobs.CalendarType{Holidays: NSEHolidays})
 	svc := jobs.NewService(pool, reg, engine, clk)
 	prims := derive.NewDefaultRegistry()
 	cat := catalog.New(pool, prims)
@@ -109,6 +111,11 @@ func (o outboxSource) Claim(ctx context.Context, tx pgx.Tx, limit int) ([]jobs.E
 func (o outboxSource) MarkDispatched(ctx context.Context, tx pgx.Tx, ids []int64) error {
 	return o.ob.MarkDispatched(ctx, tx, ids)
 }
+
+// NSEHolidays is the exchange holiday list for calendar schedules. It is
+// empty until the owner supplies the official NSE circular's dates (open
+// question in HANDOFF.md); until then only weekends are skipped.
+var NSEHolidays = jobs.HolidaySet{}
 
 // DefaultGovernance holds the percentile defaults until the model config
 // supplies them (Phase 3).
