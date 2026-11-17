@@ -19,6 +19,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/blob"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/config"
+	"github.com/shubham-kukreja/core-jobs-service/internal/quality"
 )
 
 // Core holds the modules shared by the api and worker processes.
@@ -30,6 +31,7 @@ type Core struct {
 	Datapoints    *datapoints.Store
 	Primitives    derive.Registry
 	Cascade       derive.Cascade
+	Quality       quality.Checker
 	Uploads       ingest.Uploads  // nil until EnableIngest
 	Mappings      ingest.Mappings // nil until EnableIngest
 	Registry      *jobs.Registry
@@ -59,6 +61,8 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 		Registry: prims, Clock: clk, Governance: DefaultGovernance,
 	})
 	derive.RegisterCascade(reg, casc)
+	qc := quality.NewChecker(cat, dps, DefaultGovernance.PercentileMinObservations)
+	quality.RegisterCheck(reg, qc, clk)
 	return &Core{
 		Pool:          pool,
 		Clock:         clk,
@@ -67,6 +71,7 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 		Datapoints:    dps,
 		Primitives:    prims,
 		Cascade:       casc,
+		Quality:       qc,
 		Registry:      reg,
 		ScheduleTypes: types,
 		Jobs:          svc,
