@@ -52,6 +52,7 @@ func (c *Core) NewAPI(cfg config.Config) (http.Handler, error) {
 		CORSOrigins:     cfg.CORSOrigins,
 		TrustedProxies:  proxies,
 		MaxRequestBytes: cfg.MaxRequestBytes,
+		MaxUploadBytes:  cfg.MaxUploadBytes,
 		SecretKey:       []byte(cfg.SecretKey.Reveal()),
 		CookieDomain:    cfg.CookieDomain,
 	}, api.Deps{
@@ -65,8 +66,12 @@ func (c *Core) NewAPI(cfg config.Config) (http.Handler, error) {
 		Rebuilds:    rebuilds{c.Jobs},
 		Idempotency: api.NewPGIdempotency(c.Pool),
 		Connectors:  noConnectors{},
-		Clock:       c.Clock,
-		Log:         c.Log,
+		Jobs: api.JobDeps{
+			Jobs: c.Jobs, Runs: c.Runs, Schedules: c.Schedules, Kinds: c.Registry,
+			Uploads: c.Uploads, Mappings: c.Mappings,
+		},
+		Clock: c.Clock,
+		Log:   c.Log,
 	})
 }
 

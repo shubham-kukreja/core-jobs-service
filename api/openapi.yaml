@@ -3428,9 +3428,12 @@ components:
         created_at: {type: string, format: date-time}
         expires_at: {type: [string, 'null'], format: date-time}
     ImportMappingInput:
-      type: object
-      additionalProperties: false
+      allOf:
+        - $ref: '#/components/schemas/ImportMappingFields'
       required: [name, header_row_match, date_column, columns, known_at]
+      unevaluatedProperties: false
+    ImportMappingFields:
+      type: object
       properties:
         key: {allOf: [{$ref: '#/components/schemas/Key'}], description: Stable id used as `mapping_id`. Derived from `name` when omitted.}
         name: {type: string, minLength: 1, maxLength: 200}
@@ -3459,7 +3462,7 @@ components:
         known_at: {type: string, pattern: '^(now|obs_date_plus_days:[0-9]{1,3})$'}
     ImportMapping:
       allOf:
-        - $ref: '#/components/schemas/ImportMappingInput'
+        - $ref: '#/components/schemas/ImportMappingFields'
         - type: object
           required: [key, version, created_at]
           properties:

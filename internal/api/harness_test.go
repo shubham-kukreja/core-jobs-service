@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	ingestmocks "github.com/shubham-kukreja/core-jobs-service/internal/ingest/mocks"
+	jobsmocks "github.com/shubham-kukreja/core-jobs-service/internal/jobs/mocks"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -147,6 +151,21 @@ func principalFor(u auth.User, kind auth.PrincipalKind) auth.Principal {
 	return p
 }
 
+// fakeRuns adds UUIDs to the Runs mock: run id n maps to uuidOf(n).
+type fakeRuns struct{ *jobsmocks.Runs }
+
+func (fakeRuns) UUIDs(_ context.Context, ids []int64) (map[int64]uuid.UUID, error) {
+	m := map[int64]uuid.UUID{}
+	for _, id := range ids {
+		m[id] = uuidOf(id)
+	}
+	return m, nil
+}
+
+func uuidOf(n int64) uuid.UUID {
+	return uuid.MustParse(fmt.Sprintf("00000000-0000-4000-8000-%012d", n))
+}
+
 // harness wires a Server with fakes and records audit entries.
 type harness struct {
 	t       *testing.T
@@ -158,6 +177,12 @@ type harness struct {
 	reader  *dpmocks.Reader
 	writer  *dpmocks.Writer
 	rebuild *fakeRebuilder
+	enq     *jobsmocks.Enqueuer
+	runs    *jobsmocks.Runs
+	scheds  *jobsmocks.Schedules
+	kinds   *jobs.Registry
+	uploads *ingestmocks.Uploads
+	maps    *ingestmocks.Mappings
 	clock   *clock.Fake
 	logs    *bytes.Buffer
 	audits  []audit.Entry
@@ -170,6 +195,8 @@ func newHarness(t *testing.T, mutate ...func(*Config, *Deps)) *harness {
 	hs := &harness{
 		t: t, db: &fakeDB{}, cat: &catalogmocks.Catalog{}, reader: &dpmocks.Reader{}, writer: &dpmocks.Writer{},
 		rebuild: &fakeRebuilder{}, clock: clock.NewFake(testNow), logs: &bytes.Buffer{},
+		enq: &jobsmocks.Enqueuer{}, runs: &jobsmocks.Runs{}, scheds: &jobsmocks.Schedules{}, kinds: jobs.NewRegistry(),
+		uploads: &ingestmocks.Uploads{}, maps: &ingestmocks.Mappings{},
 		auth: &fakeAuth{
 			sessions: map[string]auth.Principal{
 				adminToken:   principalFor(adminUser, auth.PrincipalSession),
@@ -192,7 +219,8 @@ func newHarness(t *testing.T, mutate ...func(*Config, *Deps)) *harness {
 		DB: hs.db, Auth: hs.auth, Users: fakeUsers{1: adminUser, 2: analystUser, 3: viewerUser}, Audit: auditor,
 		Catalog: hs.cat, Reader: hs.reader, Writer: hs.writer, Rebuilds: hs.rebuild,
 		Idempotency: &memIdem{recs: map[string]IdemRecord{}}, Clock: hs.clock,
-		Log: slog.New(slog.NewJSONHandler(hs.logs, nil)),
+		Jobs: JobDeps{Jobs: hs.enq, Runs: fakeRuns{hs.runs}, Schedules: hs.scheds, Kinds: hs.kinds, Uploads: hs.uploads, Mappings: hs.maps},
+		Log:  slog.New(slog.NewJSONHandler(hs.logs, nil)),
 	}
 	for _, m := range mutate {
 		m(&cfg, &deps)

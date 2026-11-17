@@ -33,6 +33,7 @@ type Config struct {
 	CORSOrigins     []string       // exact origins; also trusted for cross-origin checks
 	TrustedProxies  []netip.Prefix // peers whose X-Forwarded-For is honoured
 	MaxRequestBytes int64
+	MaxUploadBytes  int64  // POST /v1/uploads; 0 = MaxRequestBytes
 	SecretKey       []byte // derives the cursor key
 	CookieDomain    string
 	// Rate limits. Zero values take the defaults below.
@@ -80,6 +81,7 @@ type Deps struct {
 	Rebuilds    Rebuilder
 	Idempotency IdempotencyStore
 	Connectors  ConnectorLookup
+	Jobs        JobDeps
 	Clock       clock.Clock
 	Log         *slog.Logger
 	// Optional overrides (shared stores across instances).
@@ -102,6 +104,7 @@ type Server struct {
 	rebuilds      Rebuilder
 	idem          IdempotencyStore
 	connectors    ConnectorLookup
+	jobs          JobDeps
 	clock         clock.Clock
 	log           *slog.Logger
 	cursors       *cursorSigner
@@ -123,7 +126,8 @@ func New(cfg Config, d Deps) (http.Handler, error) {
 
 func newServer(cfg Config, d Deps) (*Server, error) {
 	if d.DB == nil || d.Auth == nil || d.Users == nil || d.Audit == nil || d.Catalog == nil ||
-		d.Reader == nil || d.Writer == nil || d.Rebuilds == nil || d.Idempotency == nil || d.Clock == nil {
+		d.Reader == nil || d.Writer == nil || d.Rebuilds == nil || d.Idempotency == nil || d.Clock == nil ||
+		d.Jobs.Jobs == nil || d.Jobs.Runs == nil || d.Jobs.Schedules == nil || d.Jobs.Kinds == nil {
 		return nil, errors.New("api: missing dependency")
 	}
 	if cfg.MaxRequestBytes <= 0 {
@@ -144,7 +148,7 @@ func newServer(cfg Config, d Deps) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg, db: d.DB, auth: d.Auth, users: d.Users, audit: d.Audit, catalog: d.Catalog,
-		reader: d.Reader, writer: d.Writer, rebuilds: d.Rebuilds, idem: d.Idempotency, connectors: d.Connectors,
+		reader: d.Reader, writer: d.Writer, rebuilds: d.Rebuilds, idem: d.Idempotency, connectors: d.Connectors, jobs: d.Jobs,
 		clock: d.Clock, log: d.Log, cursors: cursors, cop: cop,
 		ipLimiter: d.IPLimiter, userLimiter: d.UserLimiter, loginLimiter: d.LoginLimiter, loginFailures: d.LoginFailures,
 	}
@@ -213,6 +217,29 @@ func (s *Server) routes() http.Handler {
 			r.Get("/datapoints/{id}/lineage", s.requireRole(v, s.datapointLineage))
 			r.Post("/datapoints/{id}/retract", s.requireRole(a, s.retractDatapoint))
 			r.Post("/snapshot", s.requireRole(v, s.snapshot))
+
+			r.Post("/uploads", s.requireRole(a, s.createUpload))
+			r.Get("/import-mappings", s.requireRole(v, s.listImportMappings))
+			r.Post("/import-mappings", s.requireRole(a, s.saveImportMapping))
+
+			r.Get("/job-kinds", s.requireRole(v, s.listJobKinds))
+			r.Get("/jobs", s.requireRole(v, s.listJobs))
+			r.Post("/jobs", s.requireRole(a, s.submitJob))
+			r.Get("/jobs/{id}", s.requireRole(v, s.getJob))
+			r.Get("/jobs/{id}/events", s.requireRole(v, s.streamJobEvents))
+			r.Get("/jobs/{id}/tree", s.requireRole(v, s.getJobTree))
+			r.Post("/jobs/{id}/cancel", s.requireRole(v, s.cancelJob))
+			r.Post("/jobs/{id}/retry", s.requireRole(admin, s.retryJob))
+
+			r.Get("/schedules", s.requireRole(v, s.listSchedules))
+			r.Post("/schedules", s.requireRole(admin, s.createSchedule))
+			r.Patch("/schedules/{id}", s.requireRole(admin, s.updateSchedule))
+			r.Post("/schedules/{id}/run-now", s.requireRole(admin, s.runScheduleNow))
+			r.Post("/schedules/{id}/pause", s.requireRole(admin, s.setScheduleEnabled(false)))
+			r.Post("/schedules/{id}/resume", s.requireRole(admin, s.setScheduleEnabled(true)))
+			r.Get("/schedules/{id}/preview", s.requireRole(v, s.previewSchedule))
+
+			r.Get("/quality/report", s.requireRole(v, s.getQualityReport))
 		})
 	})
 	return r

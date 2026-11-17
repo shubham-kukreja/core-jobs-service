@@ -190,11 +190,15 @@ func (s *Server) crossOrigin(next http.Handler) http.Handler {
 // limitBody caps request bodies.
 func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ContentLength > s.cfg.MaxRequestBytes {
+		limit := s.cfg.MaxRequestBytes
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/uploads" && s.cfg.MaxUploadBytes > 0 {
+			limit = s.cfg.MaxUploadBytes + 64<<10 // multipart framing
+		}
+		if r.ContentLength > limit {
 			s.writeError(w, r, apperr.New(apperr.PayloadTooLarge, "Request body too large"))
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestBytes)
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		next.ServeHTTP(w, r)
 	})
 }

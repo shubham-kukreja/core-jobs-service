@@ -125,7 +125,7 @@ func parseDate(field, v string) (civil.Date, error) {
 	return d, nil
 }
 
-func queryInt(r *http.Request, name string, def, lo, hi int) (int, error) {
+func queryInt(r *http.Request, name string, def, lo, hi int) (int, error) { //nolint:unparam // a general bounds helper
 	v := r.URL.Query().Get(name)
 	if v == "" {
 		return def, nil
