@@ -6,6 +6,7 @@ toolchain go1.26.10
 
 require (
 	cloud.google.com/go v0.123.0
+	github.com/expr-lang/expr v1.17.8
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.12.0
