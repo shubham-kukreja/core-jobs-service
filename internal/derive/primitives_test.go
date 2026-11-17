@@ -119,7 +119,7 @@ func TestPercentileRankMinObsAndWindow(t *testing.T) {
 	in := Inputs{"x": monthly(2025, 12, 1, 2)}
 	wantNull(t, run(t, "percentile_rank", me(2026, 1), in, `{"window_months":180,"min_obs":3}`))
 	wantNull(t, run(t, "percentile_rank", me(2026, 1), in, `{"window_months":180}`)) // governance min 3
-	in = Inputs{"x": monthly(2025, 1, 9, 9, 9, 1, 2, 3)}                               // Jan..Jun
+	in = Inputs{"x": monthly(2025, 1, 9, 9, 9, 1, 2, 3)}                             // Jan..Jun
 	wantNum(t, run(t, "percentile_rank", me(2025, 6), in, `{"window_months":3,"min_obs":2}`), 100)
 }
 

@@ -109,7 +109,7 @@ func decodeParams(p json.RawMessage, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(p))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidParams, err)
+		return fmt.Errorf("%w: %w", ErrInvalidParams, err)
 	}
 	return nil
 }

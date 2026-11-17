@@ -194,7 +194,7 @@ func (exprPrim) ValidateInputs(p json.RawMessage, aliases []string) error {
 		env[a] = 0.0
 	}
 	if _, err := expr.Compile(x.Expr, expr.Env(env)); err != nil {
-		return fmt.Errorf("%w: expr: %v", ErrInvalidParams, err)
+		return fmt.Errorf("%w: expr: %w", ErrInvalidParams, err)
 	}
 	return nil
 }
@@ -210,7 +210,7 @@ func compileExpr(src string, aliases []string) (*vm.Program, error) {
 	}
 	prog, err := expr.Compile(src, expr.Env(env))
 	if err != nil {
-		return nil, fmt.Errorf("%w: expr: %v", ErrInvalidParams, err)
+		return nil, fmt.Errorf("%w: expr: %w", ErrInvalidParams, err)
 	}
 	exprCache.Store(key, prog)
 	return prog, nil
