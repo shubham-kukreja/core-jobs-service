@@ -26,9 +26,9 @@ type Request struct {
 
 // Stale is a series with no value for its expected period.
 type Stale struct {
-	Series     string     `json:"series"`
-	LastObs    civil.Date `json:"last_obs"`
-	ExpectedBy civil.Date `json:"expected_by"`
+	Series     string      `json:"series"`
+	LastObs    *civil.Date `json:"last_obs,omitempty"` // nil: never observed
+	ExpectedBy civil.Date  `json:"expected_by"`
 }
 
 // Outlier is a value with |z| above the threshold.

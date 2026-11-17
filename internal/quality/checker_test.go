@@ -80,7 +80,7 @@ func TestCheckReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Stale) != 1 || rep.Stale[0].Series != "flows.small" || rep.Stale[0].ExpectedBy != oct || rep.Stale[0].LastObs != sep {
+	if len(rep.Stale) != 1 || rep.Stale[0].Series != "flows.small" || rep.Stale[0].ExpectedBy != oct || *rep.Stale[0].LastObs != sep {
 		t.Errorf("stale: %+v", rep.Stale)
 	}
 	if len(rep.Outliers) != 1 || rep.Outliers[0].Series != "pe.nifty100" || rep.Outliers[0].Z <= OutlierZ {

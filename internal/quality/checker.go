@@ -172,9 +172,10 @@ func expectedPeriod(f catalog.Frequency, asOf civil.Date) (civil.Date, bool) {
 // staleness flags a series whose latest value is older than the start of
 // the expected period.
 func staleness(s catalog.Series, rows []datapoints.Resolved, expected civil.Date) (Stale, bool) {
-	var last civil.Date
+	var last *civil.Date
 	if len(rows) > 0 {
-		last = rows[len(rows)-1].ObsDate
+		d := rows[len(rows)-1].ObsDate
+		last = &d
 	}
 	start := expected
 	switch s.Frequency {
@@ -183,7 +184,7 @@ func staleness(s catalog.Series, rows []datapoints.Resolved, expected civil.Date
 	case catalog.FreqQuarterly:
 		start = calendar.AddMonths(civil.Date{Year: expected.Year, Month: expected.Month, Day: 1}, -2)
 	}
-	if len(rows) > 0 && !last.Before(start) {
+	if last != nil && !last.Before(start) {
 		return Stale{}, false
 	}
 	return Stale{Series: s.Key, LastObs: last, ExpectedBy: expected}, true
