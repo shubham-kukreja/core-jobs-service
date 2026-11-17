@@ -13,9 +13,12 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/datapoints"
 	"github.com/shubham-kukreja/core-jobs-service/internal/derive"
+	"github.com/shubham-kukreja/core-jobs-service/internal/ingest"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
 	jriver "github.com/shubham-kukreja/core-jobs-service/internal/jobs/river"
+	"github.com/shubham-kukreja/core-jobs-service/internal/platform/blob"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
+	"github.com/shubham-kukreja/core-jobs-service/internal/platform/config"
 )
 
 // Core holds the modules shared by the api and worker processes.
@@ -27,6 +30,8 @@ type Core struct {
 	Datapoints    *datapoints.Store
 	Primitives    derive.Registry
 	Cascade       derive.Cascade
+	Uploads       ingest.Uploads  // nil until EnableIngest
+	Mappings      ingest.Mappings // nil until EnableIngest
 	Registry      *jobs.Registry
 	ScheduleTypes *jobs.ScheduleTypes
 	Jobs          *jobs.Service
@@ -111,4 +116,31 @@ var DefaultGovernance = derive.Governance{
 	PercentileWindowYears:     15,
 	PercentileMinObservations: 24,
 	RespectDefinitionBreaks:   true,
+}
+
+// EnableIngest builds uploads and import mappings on blobs and registers
+// import.file. The api (to enqueue) and the worker (to run) both call it.
+func (c *Core) EnableIngest(blobs blob.Store, maxUploadBytes int64) {
+	c.Uploads = ingest.NewUploads(c.Pool, blobs, c.Clock, maxUploadBytes)
+	c.Mappings = ingest.NewMappings(c.Pool, c.Catalog)
+	ingest.RegisterImport(c.Registry, &ingest.Importer{
+		DB: c.Pool, Uploads: c.Uploads, Mappings: c.Mappings, Parser: ingest.NewParser(),
+		Writer: c.Datapoints, Clock: c.Clock, Limits: ingest.DefaultLimits,
+	})
+}
+
+// NewBlobStore opens the configured S3-compatible store and checks it is
+// reachable, private and (outside development) encrypted.
+func NewBlobStore(ctx context.Context, cfg config.Config) (blob.Store, error) {
+	s, err := blob.NewS3(blob.S3Options{
+		Endpoint: cfg.BlobEndpoint, Bucket: cfg.BlobBucket, AccessKey: cfg.BlobAccessKey.Reveal(),
+		SecretKey: cfg.BlobSecretKey.Reveal(), UseTLS: cfg.BlobUseTLS, ServerSideEncryption: cfg.BlobSSE,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Verify(ctx); err != nil {
+		return nil, err
+	}
+	return s, nil
 }

@@ -48,6 +48,9 @@ func runAPI(ctx context.Context, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := enableIngest(ctx, core, cfg, log); err != nil {
+		return err
+	}
 	v1, err := core.NewAPI(cfg)
 	if err != nil {
 		return err
@@ -68,13 +71,16 @@ func runAPI(ctx context.Context, stderr io.Writer) error {
 }
 
 func runWorker(ctx context.Context, stderr io.Writer) error {
-	_, log, pool, err := bootstrap(ctx, stderr, "core-worker")
+	cfg, log, pool, err := bootstrap(ctx, stderr, "core-worker")
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
 	core, err := app.NewCore(pool, log, clock.System{})
 	if err != nil {
+		return err
+	}
+	if err := enableIngest(ctx, core, cfg, log); err != nil {
 		return err
 	}
 	w, err := core.NewWorker()
@@ -92,6 +98,21 @@ func runWorker(ctx context.Context, stderr io.Writer) error {
 		return fmt.Errorf("worker stop: %w", err)
 	}
 	log.Info("worker stopped")
+	return nil
+}
+
+// enableIngest turns on uploads and import.file when a blob store is
+// configured. Without one (bare local runs) file import is unavailable.
+func enableIngest(ctx context.Context, core *app.Core, cfg config.Config, log *slog.Logger) error {
+	if cfg.BlobEndpoint == "" {
+		log.Warn("BLOB_ENDPOINT not set: uploads and import.file are disabled")
+		return nil
+	}
+	blobs, err := app.NewBlobStore(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("blob store: %w", err)
+	}
+	core.EnableIngest(blobs, cfg.MaxUploadBytes)
 	return nil
 }
 
