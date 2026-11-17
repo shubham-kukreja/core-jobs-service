@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -14,9 +13,9 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/api"
 	"github.com/shubham-kukreja/core-jobs-service/internal/audit"
 	"github.com/shubham-kukreja/core-jobs-service/internal/auth"
+	"github.com/shubham-kukreja/core-jobs-service/internal/derive"
 	"github.com/shubham-kukreja/core-jobs-service/internal/ingest"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
-	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/config"
 )
@@ -63,7 +62,7 @@ func (c *Core) NewAPI(cfg config.Config) (http.Handler, error) {
 		Catalog:     c.Catalog,
 		Reader:      c.Datapoints,
 		Writer:      c.Datapoints,
-		Rebuilds:    noRebuilds{},
+		Rebuilds:    rebuilds{c.Jobs},
 		Idempotency: api.NewPGIdempotency(c.Pool),
 		Connectors:  noConnectors{},
 		Clock:       c.Clock,
@@ -83,15 +82,13 @@ func parsePrefixes(cidrs []string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// noRebuilds stands in for the derive.cascade rebuild enqueuer until Phase 2.
-// It is unreachable in practice: derived series are rejected at save time
-// (noDerivations), so no derivation can change.
-type noRebuilds struct{}
+// rebuilds enqueues derive.cascade in rebuild mode, with everything
+// downstream, in the caller's transaction after a derivation changes.
+type rebuilds struct{ jobs jobs.Enqueuer }
 
-var errNoRebuilds = errors.New("app: derive.cascade is not registered until Phase 2")
-
-func (noRebuilds) EnqueueRebuild(context.Context, pgx.Tx, []string, int64) (jobs.RunRef, error) {
-	return jobs.RunRef{}, apperr.Wrap(errNoRebuilds, apperr.NotAvailable, "series rebuilds are not available yet")
+func (r rebuilds) EnqueueRebuild(ctx context.Context, tx pgx.Tx, keys []string, actorID int64) (jobs.RunRef, error) {
+	return r.jobs.EnqueueTx(ctx, tx, derive.CascadeArgs{Mode: derive.ModeRebuild, Series: keys, IncludeDownstream: true},
+		jobs.WithTrigger(jobs.TriggerUser), jobs.WithUser(actorID))
 }
 
 // noConnectors reports that no source has a fetch connector yet (Phase 5).

@@ -8,7 +8,7 @@ import (
 
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/datapoints"
-	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
+	"github.com/shubham-kukreja/core-jobs-service/internal/derive"
 )
 
 type fakeOutbox struct {
@@ -36,10 +36,10 @@ func TestOutboxSourceMapsEvents(t *testing.T) {
 	}
 }
 
-func TestDerivationsRejectedUntilPhase2(t *testing.T) {
-	_, err := noDerivations{}.ValidateDerivation(catalog.Derivation{Fn: "expr"})
-	if !apperr.Is(err, apperr.NotAvailable) {
-		t.Fatalf("want not_available, got %v", err)
+func TestDerivationsValidated(t *testing.T) {
+	_, err := derive.NewDefaultRegistry().ValidateDerivation(catalog.Derivation{Fn: "nope", Version: 1})
+	if err == nil {
+		t.Fatal("unknown primitive must be rejected")
 	}
 }
 
@@ -53,10 +53,7 @@ func TestParsePrefixes(t *testing.T) {
 	}
 }
 
-func TestRebuildsAndConnectorsUnavailable(t *testing.T) {
-	if _, err := (noRebuilds{}).EnqueueRebuild(context.Background(), nil, []string{"x"}, 1); !apperr.Is(err, apperr.NotAvailable) {
-		t.Fatalf("want not_available, got %v", err)
-	}
+func TestConnectorsUnavailable(t *testing.T) {
 	if _, ok := (noConnectors{}).Get("fred"); ok {
 		t.Fatal("no connectors exist yet")
 	}

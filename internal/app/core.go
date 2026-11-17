@@ -5,7 +5,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
@@ -13,9 +12,9 @@ import (
 
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/datapoints"
+	"github.com/shubham-kukreja/core-jobs-service/internal/derive"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
 	jriver "github.com/shubham-kukreja/core-jobs-service/internal/jobs/river"
-	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 )
 
@@ -26,6 +25,8 @@ type Core struct {
 	Log           *slog.Logger
 	Catalog       *catalog.Store
 	Datapoints    *datapoints.Store
+	Primitives    derive.Registry
+	Cascade       derive.Cascade
 	Registry      *jobs.Registry
 	ScheduleTypes *jobs.ScheduleTypes
 	Jobs          *jobs.Service
@@ -43,13 +44,22 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 	reg := jobs.NewRegistry()
 	types := jobs.DefaultScheduleTypes()
 	svc := jobs.NewService(pool, reg, engine, clk)
-	cat := catalog.New(pool, noDerivations{})
+	prims := derive.NewDefaultRegistry()
+	cat := catalog.New(pool, prims)
+	dps := datapoints.New(pool, cat, clk)
+	casc := derive.NewCascade(derive.CascadeDeps{
+		DB: pool, Catalog: cat, Reader: dps, Writer: dps, Batches: dps,
+		Registry: prims, Clock: clk, Governance: DefaultGovernance,
+	})
+	derive.RegisterCascade(reg, casc)
 	return &Core{
 		Pool:          pool,
 		Clock:         clk,
 		Log:           log,
 		Catalog:       cat,
-		Datapoints:    datapoints.New(pool, cat, clk),
+		Datapoints:    dps,
+		Primitives:    prims,
+		Cascade:       casc,
 		Registry:      reg,
 		ScheduleTypes: types,
 		Jobs:          svc,
@@ -59,11 +69,12 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 }
 
 // NewWorker builds the queue worker: job executor, scheduler and outbox
-// dispatcher. subs are the outbox subscribers (derive.cascade, veto.evaluate
-// from Phase 2).
+// dispatcher. derive.cascade's subscriber is always installed; subs adds
+// more (veto.evaluate from Phase 3).
 func (c *Core) NewWorker(subs ...jobs.Subscriber) (*jriver.Worker, error) {
 	exec := jobs.NewExecutor(c.Pool, c.Registry, c.Jobs, jobs.ExecutorConfig{Log: c.Log, Clock: c.Clock})
 	sched := jobs.NewScheduler(c.Pool, c.ScheduleTypes, c.Jobs, c.Clock, c.Log)
+	subs = append([]jobs.Subscriber{derive.Subscriber{}}, subs...)
 	disp := jobs.NewDispatcher(c.Pool, outboxSource{c.Datapoints}, jobs.NewSubscribers(subs...), c.Jobs, c.Log)
 	return jriver.NewWorker(c.Pool, jriver.WorkerDeps{
 		Registry:   c.Registry,
@@ -94,12 +105,10 @@ func (o outboxSource) MarkDispatched(ctx context.Context, tx pgx.Tx, ids []int64
 	return o.ob.MarkDispatched(ctx, tx, ids)
 }
 
-// noDerivations rejects derived series until the derive primitive registry
-// lands in Phase 2 (P2-T3-01). Raw and judgment series save normally.
-type noDerivations struct{}
-
-var errNoDerivations = errors.New("app: derivations are not available until the derive registry is wired")
-
-func (noDerivations) ValidateDerivation(catalog.Derivation) ([]string, error) {
-	return nil, apperr.Wrap(errNoDerivations, apperr.NotAvailable, "derived series cannot be saved yet")
+// DefaultGovernance holds the percentile defaults until the model config
+// supplies them (Phase 3).
+var DefaultGovernance = derive.Governance{
+	PercentileWindowYears:     15,
+	PercentileMinObservations: 24,
+	RespectDefinitionBreaks:   true,
 }
