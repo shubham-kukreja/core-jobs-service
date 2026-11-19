@@ -105,6 +105,15 @@ type Source struct {
 	Active bool
 }
 
+// SourceInput defines a source for SaveSource.
+type SourceInput struct {
+	Key    string
+	Kind   SourceKind
+	Name   string
+	Config map[string]any
+	Active bool
+}
+
 // Validation bounds a series' values. Applied by datapoints.Writer.
 type Validation struct {
 	Min *float64 `json:"min,omitempty"`
@@ -236,6 +245,9 @@ type Reader interface {
 // audit row and any rebuild job commit atomically with the change.
 type Writer interface {
 	SaveEntity(ctx context.Context, tx pgx.Tx, e Entity) (Entity, error)
+	// SaveSource upserts a source by key. Config holds non-secret settings
+	// only; credentials are referenced by name (credential_ref).
+	SaveSource(ctx context.Context, tx pgx.Tx, s SourceInput) (Source, error)
 	// SaveSeries validates the definition (including the derivation through
 	// DerivationValidator), rejects dependency cycles with ErrCycle, and
 	// rebuilds series_deps.

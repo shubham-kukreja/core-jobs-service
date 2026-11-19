@@ -3,6 +3,7 @@ package catalog
 import (
 	"math"
 	"regexp"
+	"strings"
 
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
 )
@@ -203,6 +204,31 @@ func normalizeSeries(in *SeriesInput) error {
 		}
 	}
 	return p.err("series definition is invalid")
+}
+
+var sourceKinds = set(SourceExternalAPI, SourceFileImport, SourceAnalyst, SourceOverride, SourceComputed)
+
+// secretConfigKeys mirrors the catalog.sources CHECK: credentials are named by
+// credential_ref and resolved from the environment, never stored.
+var secretConfigKeys = set("api_key", "apikey", "password", "secret", "token")
+
+func validateSource(in SourceInput) error {
+	var p problems
+	if !ValidKey(in.Key) {
+		p.add("key", "invalid_key", nil)
+	}
+	if !sourceKinds[in.Kind] {
+		p.add("kind", "unknown_kind", nil)
+	}
+	if l := len(in.Name); l == 0 || l > maxNameLen {
+		p.add("name", "invalid_length", map[string]any{"max": maxNameLen})
+	}
+	for k := range in.Config {
+		if secretConfigKeys[strings.ToLower(k)] {
+			p.add("config", "secret_not_allowed", map[string]any{"key": k})
+		}
+	}
+	return p.err("source is invalid")
 }
 
 func validateEntity(e Entity) error {

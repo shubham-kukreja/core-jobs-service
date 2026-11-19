@@ -28,6 +28,9 @@ var _ catalog.Writer = &Writer{}
 //			SaveSeriesFunc: func(ctx context.Context, tx pgx.Tx, in catalog.SeriesInput) (catalog.SaveResult, error) {
 //				panic("mock out the SaveSeries method")
 //			},
+//			SaveSourceFunc: func(ctx context.Context, tx pgx.Tx, s catalog.SourceInput) (catalog.Source, error) {
+//				panic("mock out the SaveSource method")
+//			},
 //			SetSeriesActiveFunc: func(ctx context.Context, tx pgx.Tx, key string, active bool) error {
 //				panic("mock out the SetSeriesActive method")
 //			},
@@ -43,6 +46,9 @@ type Writer struct {
 
 	// SaveSeriesFunc mocks the SaveSeries method.
 	SaveSeriesFunc func(ctx context.Context, tx pgx.Tx, in catalog.SeriesInput) (catalog.SaveResult, error)
+
+	// SaveSourceFunc mocks the SaveSource method.
+	SaveSourceFunc func(ctx context.Context, tx pgx.Tx, s catalog.SourceInput) (catalog.Source, error)
 
 	// SetSeriesActiveFunc mocks the SetSeriesActive method.
 	SetSeriesActiveFunc func(ctx context.Context, tx pgx.Tx, key string, active bool) error
@@ -67,6 +73,15 @@ type Writer struct {
 			// In is the in argument value.
 			In catalog.SeriesInput
 		}
+		// SaveSource holds details about calls to the SaveSource method.
+		SaveSource []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx pgx.Tx
+			// S is the s argument value.
+			S catalog.SourceInput
+		}
 		// SetSeriesActive holds details about calls to the SetSeriesActive method.
 		SetSeriesActive []struct {
 			// Ctx is the ctx argument value.
@@ -81,6 +96,7 @@ type Writer struct {
 	}
 	lockSaveEntity      sync.RWMutex
 	lockSaveSeries      sync.RWMutex
+	lockSaveSource      sync.RWMutex
 	lockSetSeriesActive sync.RWMutex
 }
 
@@ -161,6 +177,46 @@ func (mock *Writer) SaveSeriesCalls() []struct {
 	mock.lockSaveSeries.RLock()
 	calls = mock.calls.SaveSeries
 	mock.lockSaveSeries.RUnlock()
+	return calls
+}
+
+// SaveSource calls SaveSourceFunc.
+func (mock *Writer) SaveSource(ctx context.Context, tx pgx.Tx, s catalog.SourceInput) (catalog.Source, error) {
+	if mock.SaveSourceFunc == nil {
+		panic("Writer.SaveSourceFunc: method is nil but Writer.SaveSource was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Tx  pgx.Tx
+		S   catalog.SourceInput
+	}{
+		Ctx: ctx,
+		Tx:  tx,
+		S:   s,
+	}
+	mock.lockSaveSource.Lock()
+	mock.calls.SaveSource = append(mock.calls.SaveSource, callInfo)
+	mock.lockSaveSource.Unlock()
+	return mock.SaveSourceFunc(ctx, tx, s)
+}
+
+// SaveSourceCalls gets all the calls that were made to SaveSource.
+// Check the length with:
+//
+//	len(mockedWriter.SaveSourceCalls())
+func (mock *Writer) SaveSourceCalls() []struct {
+	Ctx context.Context
+	Tx  pgx.Tx
+	S   catalog.SourceInput
+} {
+	var calls []struct {
+		Ctx context.Context
+		Tx  pgx.Tx
+		S   catalog.SourceInput
+	}
+	mock.lockSaveSource.RLock()
+	calls = mock.calls.SaveSource
+	mock.lockSaveSource.RUnlock()
 	return calls
 }
 

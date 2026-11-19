@@ -291,6 +291,23 @@ func (s *Store) SaveEntity(ctx context.Context, tx pgx.Tx, e Entity) (Entity, er
 	return e, nil
 }
 
+func (s *Store) SaveSource(ctx context.Context, tx pgx.Tx, in SourceInput) (Source, error) {
+	if err := validateSource(in); err != nil {
+		return Source{}, err
+	}
+	cfg, err := marshalObject(in.Config)
+	if err != nil {
+		return Source{}, err
+	}
+	id, err := db.New(tx).UpsertSource(ctx, db.UpsertSourceParams{
+		Key: in.Key, Kind: string(in.Kind), Name: in.Name, Config: cfg, Active: in.Active,
+	})
+	if err != nil {
+		return Source{}, fmt.Errorf("catalog: save source: %w", err)
+	}
+	return Source{ID: id, Key: in.Key, Kind: in.Kind, Name: in.Name, Active: in.Active}, nil
+}
+
 func (s *Store) SaveSeries(ctx context.Context, tx pgx.Tx, in SeriesInput) (SaveResult, error) {
 	if err := normalizeSeries(&in); err != nil {
 		return SaveResult{}, err

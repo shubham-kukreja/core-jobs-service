@@ -71,3 +71,32 @@ func (q *Queries) ListSources(ctx context.Context) ([]ListSourcesRow, error) {
 	}
 	return items, nil
 }
+
+const upsertSource = `-- name: UpsertSource :one
+INSERT INTO catalog.sources (key, kind, name, config, active)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (key) DO UPDATE
+  SET kind = EXCLUDED.kind, name = EXCLUDED.name, config = EXCLUDED.config, active = EXCLUDED.active
+RETURNING id
+`
+
+type UpsertSourceParams struct {
+	Key    string
+	Kind   string
+	Name   string
+	Config []byte
+	Active bool
+}
+
+func (q *Queries) UpsertSource(ctx context.Context, arg UpsertSourceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, upsertSource,
+		arg.Key,
+		arg.Kind,
+		arg.Name,
+		arg.Config,
+		arg.Active,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}

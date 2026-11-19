@@ -47,6 +47,9 @@ var _ catalog.Catalog = &Catalog{}
 //			SaveSeriesFunc: func(ctx context.Context, tx pgx.Tx, in catalog.SeriesInput) (catalog.SaveResult, error) {
 //				panic("mock out the SaveSeries method")
 //			},
+//			SaveSourceFunc: func(ctx context.Context, tx pgx.Tx, s catalog.SourceInput) (catalog.Source, error) {
+//				panic("mock out the SaveSource method")
+//			},
 //			SeriesFunc: func(ctx context.Context, key string) (catalog.Series, error) {
 //				panic("mock out the Series method")
 //			},
@@ -89,6 +92,9 @@ type Catalog struct {
 
 	// SaveSeriesFunc mocks the SaveSeries method.
 	SaveSeriesFunc func(ctx context.Context, tx pgx.Tx, in catalog.SeriesInput) (catalog.SaveResult, error)
+
+	// SaveSourceFunc mocks the SaveSource method.
+	SaveSourceFunc func(ctx context.Context, tx pgx.Tx, s catalog.SourceInput) (catalog.Source, error)
 
 	// SeriesFunc mocks the Series method.
 	SeriesFunc func(ctx context.Context, key string) (catalog.Series, error)
@@ -166,6 +172,15 @@ type Catalog struct {
 			// In is the in argument value.
 			In catalog.SeriesInput
 		}
+		// SaveSource holds details about calls to the SaveSource method.
+		SaveSource []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx pgx.Tx
+			// S is the s argument value.
+			S catalog.SourceInput
+		}
 		// Series holds details about calls to the Series method.
 		Series []struct {
 			// Ctx is the ctx argument value.
@@ -207,6 +222,7 @@ type Catalog struct {
 	lockListSources     sync.RWMutex
 	lockSaveEntity      sync.RWMutex
 	lockSaveSeries      sync.RWMutex
+	lockSaveSource      sync.RWMutex
 	lockSeries          sync.RWMutex
 	lockSeriesByIDs     sync.RWMutex
 	lockSetSeriesActive sync.RWMutex
@@ -510,6 +526,46 @@ func (mock *Catalog) SaveSeriesCalls() []struct {
 	mock.lockSaveSeries.RLock()
 	calls = mock.calls.SaveSeries
 	mock.lockSaveSeries.RUnlock()
+	return calls
+}
+
+// SaveSource calls SaveSourceFunc.
+func (mock *Catalog) SaveSource(ctx context.Context, tx pgx.Tx, s catalog.SourceInput) (catalog.Source, error) {
+	if mock.SaveSourceFunc == nil {
+		panic("Catalog.SaveSourceFunc: method is nil but Catalog.SaveSource was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Tx  pgx.Tx
+		S   catalog.SourceInput
+	}{
+		Ctx: ctx,
+		Tx:  tx,
+		S:   s,
+	}
+	mock.lockSaveSource.Lock()
+	mock.calls.SaveSource = append(mock.calls.SaveSource, callInfo)
+	mock.lockSaveSource.Unlock()
+	return mock.SaveSourceFunc(ctx, tx, s)
+}
+
+// SaveSourceCalls gets all the calls that were made to SaveSource.
+// Check the length with:
+//
+//	len(mockedCatalog.SaveSourceCalls())
+func (mock *Catalog) SaveSourceCalls() []struct {
+	Ctx context.Context
+	Tx  pgx.Tx
+	S   catalog.SourceInput
+} {
+	var calls []struct {
+		Ctx context.Context
+		Tx  pgx.Tx
+		S   catalog.SourceInput
+	}
+	mock.lockSaveSource.RLock()
+	calls = mock.calls.SaveSource
+	mock.lockSaveSource.RUnlock()
 	return calls
 }
 

@@ -241,3 +241,45 @@ func TestRegistryMetadataAndActive(t *testing.T) {
 		t.Fatalf("set active on missing: %v", err)
 	}
 }
+
+func TestSaveSource(t *testing.T) {
+	f := setup(t)
+	save := func(in catalog.SourceInput) (catalog.Source, error) {
+		var out catalog.Source
+		err := database.InTx(f.ctx, f.db.Runtime, func(tx pgx.Tx) error {
+			var err error
+			out, err = f.cat.SaveSource(f.ctx, tx, in)
+			return err
+		})
+		return out, err
+	}
+	in := catalog.SourceInput{Key: "fred", Kind: catalog.SourceExternalAPI, Name: "FRED",
+		Config: map[string]any{"credential_ref": "FRED_API_KEY"}, Active: true}
+	first, err := save(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Name = "FRED (St. Louis Fed)"
+	second, err := save(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("upsert created a new row: %d then %d", first.ID, second.ID)
+	}
+	got, err := f.cat.Source(f.ctx, "fred")
+	if err != nil || got.Name != "FRED (St. Louis Fed)" {
+		t.Fatalf("source = %+v, %v", got, err)
+	}
+	var cfg string
+	if err := f.db.Runtime.QueryRow(f.ctx, `SELECT config::text FROM catalog.sources WHERE key='fred'`).Scan(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg != `{"credential_ref": "FRED_API_KEY"}` {
+		t.Fatalf("config = %s", cfg)
+	}
+	if _, err := save(catalog.SourceInput{Key: "x", Kind: catalog.SourceExternalAPI, Name: "X",
+		Config: map[string]any{"Token": "abc"}}); !apperr.Is(err, apperr.ValidationFailed) {
+		t.Fatalf("secret in config: got %v", err)
+	}
+}
