@@ -7,9 +7,7 @@ package mocks
 import (
 	"context"
 	"sync"
-	"time"
 
-	"cloud.google.com/go/civil"
 	"github.com/shubham-kukreja/core-jobs-service/internal/model"
 )
 
@@ -23,7 +21,7 @@ var _ model.InputLoader = &InputLoader{}
 //
 //		// make and configure a mocked model.InputLoader
 //		mockedInputLoader := &InputLoader{
-//			LoadFunc: func(ctx context.Context, model1 string, asOf civil.Date, cutoff time.Time, c model.Config, p model.Params) (model.EvalInput, error) {
+//			LoadFunc: func(ctx context.Context, r model.LoadRequest) (model.EvalInput, error) {
 //				panic("mock out the Load method")
 //			},
 //		}
@@ -34,7 +32,7 @@ var _ model.InputLoader = &InputLoader{}
 //	}
 type InputLoader struct {
 	// LoadFunc mocks the Load method.
-	LoadFunc func(ctx context.Context, model1 string, asOf civil.Date, cutoff time.Time, c model.Config, p model.Params) (model.EvalInput, error)
+	LoadFunc func(ctx context.Context, r model.LoadRequest) (model.EvalInput, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -42,45 +40,29 @@ type InputLoader struct {
 		Load []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// Model1 is the model1 argument value.
-			Model1 string
-			// AsOf is the asOf argument value.
-			AsOf civil.Date
-			// Cutoff is the cutoff argument value.
-			Cutoff time.Time
-			// C is the c argument value.
-			C model.Config
-			// P is the p argument value.
-			P model.Params
+			// R is the r argument value.
+			R model.LoadRequest
 		}
 	}
 	lockLoad sync.RWMutex
 }
 
 // Load calls LoadFunc.
-func (mock *InputLoader) Load(ctx context.Context, model1 string, asOf civil.Date, cutoff time.Time, c model.Config, p model.Params) (model.EvalInput, error) {
+func (mock *InputLoader) Load(ctx context.Context, r model.LoadRequest) (model.EvalInput, error) {
 	if mock.LoadFunc == nil {
 		panic("InputLoader.LoadFunc: method is nil but InputLoader.Load was just called")
 	}
 	callInfo := struct {
-		Ctx    context.Context
-		Model1 string
-		AsOf   civil.Date
-		Cutoff time.Time
-		C      model.Config
-		P      model.Params
+		Ctx context.Context
+		R   model.LoadRequest
 	}{
-		Ctx:    ctx,
-		Model1: model1,
-		AsOf:   asOf,
-		Cutoff: cutoff,
-		C:      c,
-		P:      p,
+		Ctx: ctx,
+		R:   r,
 	}
 	mock.lockLoad.Lock()
 	mock.calls.Load = append(mock.calls.Load, callInfo)
 	mock.lockLoad.Unlock()
-	return mock.LoadFunc(ctx, model1, asOf, cutoff, c, p)
+	return mock.LoadFunc(ctx, r)
 }
 
 // LoadCalls gets all the calls that were made to Load.
@@ -88,20 +70,12 @@ func (mock *InputLoader) Load(ctx context.Context, model1 string, asOf civil.Dat
 //
 //	len(mockedInputLoader.LoadCalls())
 func (mock *InputLoader) LoadCalls() []struct {
-	Ctx    context.Context
-	Model1 string
-	AsOf   civil.Date
-	Cutoff time.Time
-	C      model.Config
-	P      model.Params
+	Ctx context.Context
+	R   model.LoadRequest
 } {
 	var calls []struct {
-		Ctx    context.Context
-		Model1 string
-		AsOf   civil.Date
-		Cutoff time.Time
-		C      model.Config
-		P      model.Params
+		Ctx context.Context
+		R   model.LoadRequest
 	}
 	mock.lockLoad.RLock()
 	calls = mock.calls.Load

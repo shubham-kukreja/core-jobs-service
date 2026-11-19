@@ -19,6 +19,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/shubham-kukreja/core-jobs-service/configs"
+	"github.com/shubham-kukreja/core-jobs-service/internal/model"
+	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
 )
 
 const schemaBase = "https://core.arviawealth.com/schema/"
@@ -205,6 +207,28 @@ func crossCheck(docs Documents) error {
 				}
 			}
 		}
+		md, err := decode[modelDoc](doc)
+		if err != nil {
+			add("%s: %v", path, err)
+			continue
+		}
+		if err := model.CheckConfig(md.Config, model.NewEngine()); err != nil {
+			add("%s: %v", path, describe(err))
+		}
+		for key, ptr := range model.ReferencedSeries(md.Config) {
+			if _, ok := series[key]; !ok {
+				add("%s: config%s references unknown series %q", path, ptr, key)
+			}
+		}
+		if p := md.Portfolio; p != nil {
+			found := false
+			for _, rp := range list(docs["risk_profiles.yaml"]) {
+				found = found || str(rp, "key") == p.RiskProfile
+			}
+			if !found {
+				add("%s: portfolio %s: unknown risk profile %q", path, p.Key, p.RiskProfile)
+			}
+		}
 	}
 
 	for path, doc := range docs {
@@ -345,4 +369,17 @@ func num(v any) float64 {
 		return n
 	}
 	return math.NaN()
+}
+
+// describe flattens an apperr's details into one line.
+func describe(err error) string {
+	e, ok := apperr.As(err)
+	if !ok || len(e.Details) == 0 {
+		return err.Error()
+	}
+	parts := make([]string, 0, len(e.Details))
+	for _, d := range e.Details {
+		parts = append(parts, fmt.Sprintf("config%s: %s %v", d.Path, d.Reason, d.Meta))
+	}
+	return strings.Join(parts, "; ")
 }

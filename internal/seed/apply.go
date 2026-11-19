@@ -10,11 +10,13 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/shubham-kukreja/core-jobs-service/internal/audit"
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/ingest"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
+	"github.com/shubham-kukreja/core-jobs-service/internal/model"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/database"
 )
 
@@ -30,6 +32,10 @@ type Target struct {
 	Mappings ingest.Mappings
 	Audit    audit.Auditor
 	Rebuilds Rebuilder
+	// Model and Schedules are optional: without them model configs, risk
+	// profiles, portfolios and schedules are not applied.
+	Model     *model.Store
+	Schedules jobs.Schedules
 }
 
 // Report says what Apply wrote.
@@ -38,6 +44,11 @@ type Report struct {
 	Entities int `json:"entities"`
 	Series   int `json:"series"`
 	Mappings int `json:"mappings"`
+	// Models counts model configs written (new or activated), Profiles new
+	// risk profile versions, Schedules schedules created.
+	Models    int `json:"models"`
+	Profiles  int `json:"profiles"`
+	Schedules int `json:"schedules"`
 	// Rebuild lists series whose derivation is new or changed; one
 	// derive.cascade rebuild covers them and everything downstream.
 	Rebuild []string     `json:"rebuild,omitempty"`
@@ -50,8 +61,10 @@ type Report struct {
 // nothing. Mappings are saved after, since they validate against committed
 // series. Applying the same seed twice changes nothing and enqueues nothing.
 //
-// Schedules are not applied: their kinds (veto.evaluate, model.run) are
-// registered in Phase 3.
+// Model configs, risk profiles and the portfolio commit in a second
+// transaction (the config validator reads the committed catalog), then
+// mappings, then schedules: missing ones are created, existing ones (which
+// an admin may have edited or paused) are left alone.
 func Apply(ctx context.Context, t Target, docs Documents, actorID int64) (Report, error) {
 	var rep Report
 	sources, err := decode[[]sourceDoc](docs["sources.yaml"])
@@ -114,13 +127,149 @@ func Apply(ctx context.Context, t Target, docs Documents, actorID int64) (Report
 		return Report{}, err
 	}
 
+	if t.Model != nil {
+		if err := applyModels(ctx, t, docs, actorID, &rep); err != nil {
+			return rep, err
+		}
+	}
 	for _, m := range maps {
 		if _, err := t.Mappings.Save(ctx, m.Key, m.Name, m.Mapping, actorID); err != nil {
 			return rep, fmt.Errorf("import mapping %s: %w", m.Key, err)
 		}
 		rep.Mappings++
 	}
+	if t.Schedules != nil {
+		if err := applySchedules(ctx, t, docs, actorID, &rep); err != nil {
+			return rep, err
+		}
+	}
 	return rep, nil
+}
+
+type modelDoc struct {
+	Model     string        `json:"model"`
+	Name      string        `json:"name"`
+	Version   int           `json:"version"`
+	Portfolio *portfolioDoc `json:"portfolio"`
+	Config    model.Config  `json:"config"`
+}
+
+type portfolioDoc struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	RiskProfile string `json:"risk_profile"`
+}
+
+type profileDoc struct {
+	Key            string                     `json:"key"`
+	Name           string                     `json:"name"`
+	NeutralWeights map[string]decimal.Decimal `json:"neutral_weights"`
+}
+
+type scheduleDoc struct {
+	Name          string          `json:"name"`
+	Kind          string          `json:"kind"`
+	Args          json.RawMessage `json:"args"`
+	ScheduleType  string          `json:"schedule_type"`
+	Expr          string          `json:"expr"`
+	Timezone      string          `json:"timezone"`
+	OverlapPolicy string          `json:"overlap_policy"`
+	CatchupPolicy string          `json:"catchup_policy"`
+	JitterSecs    int             `json:"jitter_secs"`
+	Enabled       *bool           `json:"enabled"`
+}
+
+func applyModels(ctx context.Context, t Target, docs Documents, actorID int64, rep *Report) error {
+	profiles, err := decode[[]profileDoc](docs["risk_profiles.yaml"])
+	if err != nil && docs["risk_profiles.yaml"] != nil {
+		return fmt.Errorf("risk_profiles.yaml: %w", err)
+	}
+	var models []modelDoc
+	var paths []string
+	for p := range docs {
+		if strings.HasPrefix(filepath.Base(p), "model_") {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		m, err := decode[modelDoc](docs[p])
+		if err != nil {
+			return fmt.Errorf("%s: %w", p, err)
+		}
+		models = append(models, m)
+	}
+	return database.InTx(ctx, t.DB, func(tx pgx.Tx) error {
+		for _, p := range profiles {
+			before, err := t.Model.GetProfile(ctx, p.Key)
+			saved, serr := t.Model.SaveProfile(ctx, tx, model.RiskProfile{Key: p.Key, Name: p.Name, NeutralWeights: p.NeutralWeights})
+			if serr != nil {
+				return fmt.Errorf("risk profile %s: %w", p.Key, serr)
+			}
+			if err != nil || saved.Version != before.Version {
+				rep.Profiles++
+			}
+		}
+		for _, m := range models {
+			wrote, err := t.Model.SeedConfig(ctx, tx, m.Model, m.Name, m.Version, m.Config, "seed", actorID)
+			if err != nil {
+				return fmt.Errorf("model %s v%d: %w", m.Model, m.Version, err)
+			}
+			if wrote {
+				rep.Models++
+			}
+			if p := m.Portfolio; p != nil {
+				if err := t.Model.SeedPortfolio(ctx, tx, p.Key, p.Name, m.Model, p.RiskProfile); err != nil {
+					return fmt.Errorf("portfolio %s: %w", p.Key, err)
+				}
+			}
+		}
+		if rep.Models+rep.Profiles == 0 {
+			return nil
+		}
+		return t.Audit.Record(ctx, tx, audit.Entry{
+			ActorID: &actorID, ActorKind: audit.ActorUser, Entity: "seed", EntityID: "configs/seed/models",
+			Action: "apply", After: map[string]int{"models": rep.Models, "profiles": rep.Profiles},
+		})
+	})
+}
+
+func applySchedules(ctx context.Context, t Target, docs Documents, actorID int64, rep *Report) error {
+	if docs["schedules.yaml"] == nil {
+		return nil
+	}
+	want, err := decode[[]scheduleDoc](docs["schedules.yaml"])
+	if err != nil {
+		return fmt.Errorf("schedules.yaml: %w", err)
+	}
+	have, err := t.Schedules.List(ctx)
+	if err != nil {
+		return err
+	}
+	exists := map[string]bool{}
+	for _, s := range have {
+		exists[s.Name] = true
+	}
+	return database.InTx(ctx, t.DB, func(tx pgx.Tx) error {
+		for _, s := range want {
+			if exists[s.Name] {
+				continue
+			}
+			enabled := s.Enabled == nil || *s.Enabled
+			args := s.Args
+			if len(args) == 0 {
+				args = json.RawMessage(`{}`)
+			}
+			if _, err := t.Schedules.Save(ctx, tx, jobs.Schedule{
+				Name: s.Name, Kind: s.Kind, Args: args, ScheduleType: s.ScheduleType, Expr: s.Expr, Timezone: s.Timezone,
+				OverlapPolicy: s.OverlapPolicy, CatchupPolicy: s.CatchupPolicy, JitterSecs: s.JitterSecs, Enabled: enabled,
+			}, actorID); err != nil {
+				return fmt.Errorf("schedule %s: %w", s.Name, err)
+			}
+			rep.Schedules++
+		}
+		return nil
+	})
 }
 
 type sourceDoc struct {

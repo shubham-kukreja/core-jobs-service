@@ -6,6 +6,9 @@ package app
 import (
 	"context"
 	"log/slog"
+	"time"
+
+	"cloud.google.com/go/civil"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +20,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/ingest"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
 	jriver "github.com/shubham-kukreja/core-jobs-service/internal/jobs/river"
+	"github.com/shubham-kukreja/core-jobs-service/internal/model"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/blob"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/config"
@@ -34,6 +38,9 @@ type Core struct {
 	Primitives    derive.Registry
 	Cascade       derive.Cascade
 	Explainer     derive.Explainer
+	Model         *model.Store
+	Engine        *model.Pipeline
+	Loader        model.InputLoader
 	Quality       quality.Checker
 	Uploads       ingest.Uploads  // nil until EnableIngest
 	Mappings      ingest.Mappings // nil until EnableIngest
@@ -53,12 +60,17 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 	}
 	reg := jobs.NewRegistry()
 	types := jobs.DefaultScheduleTypes()
-	// Review dates come from the active model config once Phase 3 lands.
-	types.Register(jobs.CalendarType{Holidays: NSEHolidays})
 	svc := jobs.NewService(pool, reg, engine, clk)
 	prims := derive.NewDefaultRegistry()
 	cat := catalog.New(pool, prims)
 	dps := datapoints.New(pool, cat, clk)
+	eng := model.NewEngine()
+	ms := model.NewStore(pool, model.NewValidator(eng, cat))
+	types.Register(jobs.CalendarType{Holidays: NSEHolidays, Reviews: reviewCalendar{ms}.dates})
+	loader := model.NewLoader(dps, ms, clk)
+	mdeps := model.JobDeps{DB: pool, Store: ms, Engine: eng, Loader: loader, Reader: dps, Writer: dps, Clock: clk}
+	model.RegisterRun(reg, mdeps)
+	model.RegisterVeto(reg, mdeps)
 	casc := derive.NewCascade(derive.CascadeDeps{
 		DB: pool, Catalog: cat, Reader: dps, Writer: dps, Batches: dps,
 		Registry: prims, Clock: clk, Governance: DefaultGovernance,
@@ -74,6 +86,9 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 		Datapoints: dps,
 		Primitives: prims,
 		Cascade:    casc,
+		Model:      ms,
+		Engine:     eng,
+		Loader:     loader,
 		Explainer: derive.NewExplainer(derive.ExplainerDeps{
 			Catalog: cat, Reader: dps, Registry: prims, Clock: clk, Governance: DefaultGovernance,
 		}),
@@ -87,12 +102,12 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 }
 
 // NewWorker builds the queue worker: job executor, scheduler and outbox
-// dispatcher. derive.cascade's subscriber is always installed; subs adds
-// more (veto.evaluate from Phase 3).
+// dispatcher. The derive.cascade and veto.evaluate subscribers are always
+// installed; subs adds more.
 func (c *Core) NewWorker(subs ...jobs.Subscriber) (*jriver.Worker, error) {
 	exec := jobs.NewExecutor(c.Pool, c.Registry, c.Jobs, jobs.ExecutorConfig{Log: c.Log, Clock: c.Clock})
 	sched := jobs.NewScheduler(c.Pool, c.ScheduleTypes, c.Jobs, c.Clock, c.Log)
-	subs = append([]jobs.Subscriber{derive.Subscriber{}}, subs...)
+	subs = append([]jobs.Subscriber{derive.Subscriber{}, model.VetoSubscriber{}}, subs...)
 	disp := jobs.NewDispatcher(c.Pool, outboxSource{c.Datapoints}, jobs.NewSubscribers(subs...), c.Jobs, c.Log)
 	return jriver.NewWorker(c.Pool, jriver.WorkerDeps{
 		Registry:   c.Registry,
@@ -121,6 +136,22 @@ func (o outboxSource) Claim(ctx context.Context, tx pgx.Tx, limit int) ([]jobs.E
 
 func (o outboxSource) MarkDispatched(ctx context.Context, tx pgx.Tx, ids []int64) error {
 	return o.ob.MarkDispatched(ctx, tx, ids)
+}
+
+// reviewCalendar reads a review cycle's dates from the default model's
+// active config, for review:<cycle> calendar schedules. The scheduler's
+// calendar interface passes no context, so each lookup gets a short
+// deadline of its own.
+type reviewCalendar struct{ ms *model.Store }
+
+func (r reviewCalendar) dates(cycle string) []civil.Date {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cv, err := r.ms.Active(ctx, model.DefaultModel)
+	if err != nil {
+		return nil
+	}
+	return cv.Config.ReviewCalendar[cycle]
 }
 
 // NSEHolidays is the exchange holiday list for calendar schedules. It is
@@ -164,11 +195,13 @@ func NewBlobStore(ctx context.Context, cfg config.Config) (blob.Store, error) {
 }
 
 // SeedTarget is where `app seed apply` writes: the catalog, import mappings,
-// the audit log, and derive.cascade rebuilds for new or changed derivations.
+// model configs, risk profiles, portfolios, schedules, the audit log, and
+// derive.cascade rebuilds for new or changed derivations.
 func (c *Core) SeedTarget() seed.Target {
 	maps := c.Mappings
 	if maps == nil {
 		maps = ingest.NewMappings(c.Pool, c.Catalog)
 	}
-	return seed.Target{DB: c.Pool, Catalog: c.Catalog, Mappings: maps, Audit: audit.NewPG(c.Pool), Rebuilds: rebuilds{c.Jobs}}
+	return seed.Target{DB: c.Pool, Catalog: c.Catalog, Mappings: maps, Audit: audit.NewPG(c.Pool), Rebuilds: rebuilds{c.Jobs},
+		Model: c.Model, Schedules: c.Schedules}
 }

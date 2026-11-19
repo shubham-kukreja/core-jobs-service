@@ -30,7 +30,7 @@ var _ model.Runs = &Runs{}
 //			ApproveFunc: func(ctx context.Context, tx pgx.Tx, id uuid.UUID, actorID int64, note string) error {
 //				panic("mock out the Approve method")
 //			},
-//			CreateFunc: func(ctx context.Context, tx pgx.Tx, r model.Run, res model.Result) (model.Run, error) {
+//			CreateFunc: func(ctx context.Context, tx pgx.Tx, r model.Run, in model.EvalInput, res model.Result) (model.Run, error) {
 //				panic("mock out the Create method")
 //			},
 //			GetFunc: func(ctx context.Context, id uuid.UUID) (model.Run, error) {
@@ -59,7 +59,7 @@ type Runs struct {
 	ApproveFunc func(ctx context.Context, tx pgx.Tx, id uuid.UUID, actorID int64, note string) error
 
 	// CreateFunc mocks the Create method.
-	CreateFunc func(ctx context.Context, tx pgx.Tx, r model.Run, res model.Result) (model.Run, error)
+	CreateFunc func(ctx context.Context, tx pgx.Tx, r model.Run, in model.EvalInput, res model.Result) (model.Run, error)
 
 	// GetFunc mocks the Get method.
 	GetFunc func(ctx context.Context, id uuid.UUID) (model.Run, error)
@@ -103,6 +103,8 @@ type Runs struct {
 			Tx pgx.Tx
 			// R is the r argument value.
 			R model.Run
+			// In is the in argument value.
+			In model.EvalInput
 			// Res is the res argument value.
 			Res model.Result
 		}
@@ -235,7 +237,7 @@ func (mock *Runs) ApproveCalls() []struct {
 }
 
 // Create calls CreateFunc.
-func (mock *Runs) Create(ctx context.Context, tx pgx.Tx, r model.Run, res model.Result) (model.Run, error) {
+func (mock *Runs) Create(ctx context.Context, tx pgx.Tx, r model.Run, in model.EvalInput, res model.Result) (model.Run, error) {
 	if mock.CreateFunc == nil {
 		panic("Runs.CreateFunc: method is nil but Runs.Create was just called")
 	}
@@ -243,17 +245,19 @@ func (mock *Runs) Create(ctx context.Context, tx pgx.Tx, r model.Run, res model.
 		Ctx context.Context
 		Tx  pgx.Tx
 		R   model.Run
+		In  model.EvalInput
 		Res model.Result
 	}{
 		Ctx: ctx,
 		Tx:  tx,
 		R:   r,
+		In:  in,
 		Res: res,
 	}
 	mock.lockCreate.Lock()
 	mock.calls.Create = append(mock.calls.Create, callInfo)
 	mock.lockCreate.Unlock()
-	return mock.CreateFunc(ctx, tx, r, res)
+	return mock.CreateFunc(ctx, tx, r, in, res)
 }
 
 // CreateCalls gets all the calls that were made to Create.
@@ -264,12 +268,14 @@ func (mock *Runs) CreateCalls() []struct {
 	Ctx context.Context
 	Tx  pgx.Tx
 	R   model.Run
+	In  model.EvalInput
 	Res model.Result
 } {
 	var calls []struct {
 		Ctx context.Context
 		Tx  pgx.Tx
 		R   model.Run
+		In  model.EvalInput
 		Res model.Result
 	}
 	mock.lockCreate.RLock()

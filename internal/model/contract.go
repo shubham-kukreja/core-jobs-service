@@ -288,9 +288,21 @@ type Engine interface {
 	RegisterConstraint(c Constraint)
 }
 
-// InputLoader assembles an EvalInput from stored datapoints at a cutoff.
+// LoadRequest says what to load for one evaluation.
+type LoadRequest struct {
+	Model   string
+	AsOf    civil.Date
+	Cutoff  time.Time // knowledge cutoff; zero = now
+	Config  Config
+	Profile RiskProfile
+	Params  Params
+}
+
+// InputLoader assembles an EvalInput from stored datapoints at a cutoff:
+// each referenced score and trigger's latest value at or before AsOf, the
+// overrides in force, and the satellite history from published runs.
 type InputLoader interface {
-	Load(ctx context.Context, model string, asOf civil.Date, cutoff time.Time, c Config, p Params) (EvalInput, error)
+	Load(ctx context.Context, r LoadRequest) (EvalInput, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -320,11 +332,14 @@ type Run struct {
 	Params          Params
 	Status          RunStatus
 	Warnings        []Warning
-	JobRunID        *int64
-	CreatedBy       *int64
-	ApprovedBy      *int64
-	CreatedAt       time.Time
-	ApprovedAt      *time.Time
+	// DerivationHash is InputHash of the run's EvalInput: equal hashes mean
+	// equal results.
+	DerivationHash []byte
+	JobRunID       *int64
+	CreatedBy      *int64
+	ApprovedBy     *int64
+	CreatedAt      time.Time
+	ApprovedAt     *time.Time
 }
 
 // RunFilter narrows Runs.List.
@@ -338,7 +353,9 @@ type RunFilter struct {
 // Runs stores runs, their node values and allocations. Values and
 // allocations are append-only.
 type Runs interface {
-	Create(ctx context.Context, tx pgx.Tx, r Run, res Result) (Run, error)
+	// Create stores the run with its inputs (so it can be replayed), node
+	// values and allocation.
+	Create(ctx context.Context, tx pgx.Tx, r Run, in EvalInput, res Result) (Run, error)
 	Get(ctx context.Context, id uuid.UUID) (Run, error)
 	List(ctx context.Context, f RunFilter) (paging.Page[Run], error)
 	Values(ctx context.Context, id uuid.UUID, step string) ([]Node, error)

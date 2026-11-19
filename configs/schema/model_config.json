@@ -10,6 +10,17 @@
     "model": {"$ref": "defs.json#/$defs/key"},
     "name": {"$ref": "defs.json#/$defs/name"},
     "version": {"type": "integer", "minimum": 1},
+    "portfolio": {
+      "description": "The portfolio this model serves and the risk profile it starts on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "risk_profile"],
+      "properties": {
+        "key": {"$ref": "defs.json#/$defs/key"},
+        "name": {"$ref": "defs.json#/$defs/name"},
+        "risk_profile": {"$ref": "defs.json#/$defs/key"}
+      }
+    },
     "config": {
       "type": "object",
       "additionalProperties": false,

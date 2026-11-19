@@ -2,6 +2,7 @@
 model: maaf
 name: Multi-Asset Allocation Framework
 version: 1
+portfolio: {key: core, name: CORE, risk_profile: balanced}
 config:
   steps: [composite, veto, tilt, sector_qualify, constraints, normalize, sleeve, rollup]
   missing_score: 50

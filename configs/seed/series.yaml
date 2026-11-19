@@ -823,3 +823,29 @@
 - {key: trig.amc_restrictions.sector.fmcg, name: "AMC inflow restrictions — FMCG", entity: sector.fmcg, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
 - {key: trig.amc_restrictions.sector.energy, name: "AMC inflow restrictions — Energy", entity: sector.energy, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
 - {key: trig.amc_restrictions.sector.metals, name: "AMC inflow restrictions — Metals & Mining", entity: sector.metals, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+
+# ----------------------------------------------------------------------------
+# Veto states, written by veto.evaluate: true when any of the bucket's
+# triggers (the model config's vetoes map) is true at as_of, with lineage to
+# the triggers. The engine applies the same rule from the triggers directly.
+# ----------------------------------------------------------------------------
+- {key: veto.l1.equity, name: "Veto — Equity", entity: l1.equity, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.l1.debt, name: "Veto — Debt", entity: l1.debt, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.l1.metals, name: "Veto — Metals", entity: l1.metals, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.equity.large, name: "Veto — Large Cap", entity: equity.large, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.equity.mid, name: "Veto — Mid Cap", entity: equity.mid, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.equity.small, name: "Veto — Small Cap", entity: equity.small, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.equity.intl, name: "Veto — International", entity: equity.intl, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.debt.liquid, name: "Veto — Liquid", entity: debt.liquid, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.debt.corporate, name: "Veto — Corporate", entity: debt.corporate, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.debt.gilt, name: "Veto — Gilt / Long", entity: debt.gilt, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.metals.gold, name: "Veto — Gold", entity: metals.gold, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.metals.silver, name: "Veto — Silver", entity: metals.silver, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.sector.banking, name: "Veto — Banking", entity: sector.banking, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.sector.it, name: "Veto — IT Services", entity: sector.it, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.sector.pharma, name: "Veto — Pharma", entity: sector.pharma, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.sector.auto, name: "Veto — Auto", entity: sector.auto, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.sector.capgoods, name: "Veto — Capital Goods", entity: sector.capgoods, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.sector.fmcg, name: "Veto — FMCG", entity: sector.fmcg, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.sector.energy, name: "Veto — Energy", entity: sector.energy, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}
+- {key: veto.sector.metals, name: "Veto — Metals & Mining", entity: sector.metals, layer: veto, value_type: bool, frequency: event, registry: {group: veto, update_type: veto, owner: "System"}}

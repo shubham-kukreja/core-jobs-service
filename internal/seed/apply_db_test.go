@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/shubham-kukreja/core-jobs-service/internal/app"
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
@@ -41,7 +43,8 @@ func TestApplyShippedSeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Series != len(want) || rep.Mappings != 5 || rep.Sources != 10 || rep.Entities != 25 {
+	if rep.Series != len(want) || rep.Mappings != 5 || rep.Sources != 10 || rep.Entities != 25 ||
+		rep.Models != 1 || rep.Profiles != 1 || rep.Schedules != 5 {
 		t.Fatalf("report = %+v", rep)
 	}
 	// Every derived series is new, so all of them rebuild, in one job.
@@ -67,8 +70,22 @@ func TestApplyShippedSeed(t *testing.T) {
 	if n := count(`SELECT count(*) FROM catalog.series WHERE layer = 'score'`); n != 85 {
 		t.Fatalf("catalog has %d scores, want 85", n)
 	}
-	if n := count(`SELECT count(*) FROM audit.audit_log WHERE entity = 'seed' AND action = 'apply'`); n != 1 {
+	if n := count(`SELECT count(*) FROM audit.audit_log WHERE entity = 'seed' AND action = 'apply'`); n != 2 {
 		t.Fatalf("audit rows = %d", n)
+	}
+	cv, err := core.Model.Active(ctx, "maaf")
+	if err != nil || cv.Version != 1 || cv.Config.SectorSatellite == nil || len(cv.Config.SectorSatellite.Vetoes["*"]) != 3 {
+		t.Fatalf("active config = %+v, %v", cv, err)
+	}
+	pf, err := core.Model.Portfolio(ctx, "core")
+	if err != nil || pf.ModelKey != "maaf" {
+		t.Fatalf("portfolio = %+v, %v", pf, err)
+	}
+	if prof, err := core.Model.ProfileByID(ctx, pf.RiskProfileID); err != nil || prof.Key != "balanced" || !prof.NeutralWeights["l1.debt"].Equal(decimal.RequireFromString("0.35")) {
+		t.Fatalf("profile = %+v, %v", prof, err)
+	}
+	if n := count(`SELECT count(*) FROM jobs.job_schedules WHERE kind IN ('model.run', 'veto.evaluate')`); n != 3 {
+		t.Fatalf("model schedules = %d", n)
 	}
 	s, err := core.Catalog.Series(ctx, "l1.equity::valuation")
 	if err != nil || s.Registry.SignalKey != "valuation" || s.Derivation == nil || s.Derivation.Fn != "expr" {
@@ -81,8 +98,8 @@ func TestApplyShippedSeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Rebuild) != 0 || rep.Run != nil {
-		t.Fatalf("re-apply rebuilds %v", rep.Rebuild)
+	if len(rep.Rebuild) != 0 || rep.Run != nil || rep.Models != 0 || rep.Profiles != 0 || rep.Schedules != 0 {
+		t.Fatalf("re-apply wrote %+v", rep)
 	}
 	if n := count(`SELECT count(*) FROM jobs.job_runs`); n != jobsBefore {
 		t.Fatalf("re-apply enqueued %d jobs", n-jobsBefore)
