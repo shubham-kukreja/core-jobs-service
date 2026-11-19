@@ -68,7 +68,7 @@ func (q *Queries) ActiveConfig(ctx context.Context, modelKey string) (ActiveConf
 
 const activeOverrides = `-- name: ActiveOverrides :many
 
-SELECT o.uuid, o.node_key, o.as_of, o.value_num, o.value_bool, o.reason, o.actor_id, o.valid_until
+SELECT o.uuid, o.node_key, o.as_of, o.value_num, o.value_bool, o.reason, o.actor_id, o.valid_until, o.created_at
 FROM model.node_overrides o JOIN model.models m ON m.id = o.model_id
 WHERE m.key = $1 AND o.deleted_at IS NULL
   AND o.as_of <= $2 AND (o.valid_until IS NULL OR o.valid_until >= $2)
@@ -89,6 +89,7 @@ type ActiveOverridesRow struct {
 	Reason     string
 	ActorID    int64
 	ValidUntil pgtype.Date
+	CreatedAt  time.Time
 }
 
 // Overrides ------------------------------------------------------------------
@@ -110,6 +111,7 @@ func (q *Queries) ActiveOverrides(ctx context.Context, arg ActiveOverridesParams
 			&i.Reason,
 			&i.ActorID,
 			&i.ValidUntil,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -134,6 +136,26 @@ type ApproveRunParams struct {
 func (q *Queries) ApproveRun(ctx context.Context, arg ApproveRunParams) error {
 	_, err := q.db.Exec(ctx, approveRun, arg.ActorID, arg.ID)
 	return err
+}
+
+const currentRun = `-- name: CurrentRun :one
+SELECT r.uuid FROM model.model_runs r
+JOIN model.models m ON m.id = r.model_id
+JOIN model.risk_profiles rp ON rp.id = r.risk_profile_id
+WHERE m.key = $1 AND rp.key = $2 AND r.status = 'published'
+ORDER BY r.id DESC LIMIT 1
+`
+
+type CurrentRunParams struct {
+	ModelKey   string
+	ProfileKey string
+}
+
+func (q *Queries) CurrentRun(ctx context.Context, arg CurrentRunParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, currentRun, arg.ModelKey, arg.ProfileKey)
+	var uuid uuid.UUID
+	err := row.Scan(&uuid)
+	return uuid, err
 }
 
 const deleteOverride = `-- name: DeleteOverride :execrows
@@ -342,7 +364,7 @@ func (q *Queries) InsertConfig(ctx context.Context, arg InsertConfigParams) (Ins
 const insertOverride = `-- name: InsertOverride :one
 INSERT INTO model.node_overrides (model_id, node_key, as_of, value_num, value_bool, reason, actor_id, valid_until)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING uuid
+RETURNING uuid, created_at
 `
 
 type InsertOverrideParams struct {
@@ -356,7 +378,12 @@ type InsertOverrideParams struct {
 	ValidUntil pgtype.Date
 }
 
-func (q *Queries) InsertOverride(ctx context.Context, arg InsertOverrideParams) (uuid.UUID, error) {
+type InsertOverrideRow struct {
+	Uuid      uuid.UUID
+	CreatedAt time.Time
+}
+
+func (q *Queries) InsertOverride(ctx context.Context, arg InsertOverrideParams) (InsertOverrideRow, error) {
 	row := q.db.QueryRow(ctx, insertOverride,
 		arg.ModelID,
 		arg.NodeKey,
@@ -367,9 +394,9 @@ func (q *Queries) InsertOverride(ctx context.Context, arg InsertOverrideParams) 
 		arg.ActorID,
 		arg.ValidUntil,
 	)
-	var uuid uuid.UUID
-	err := row.Scan(&uuid)
-	return uuid, err
+	var i InsertOverrideRow
+	err := row.Scan(&i.Uuid, &i.CreatedAt)
+	return i, err
 }
 
 const insertProfile = `-- name: InsertProfile :one

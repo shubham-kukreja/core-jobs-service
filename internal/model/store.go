@@ -33,7 +33,10 @@ type Store struct {
 	validator Validator
 }
 
-var _ Configs = (*Store)(nil)
+var (
+	_ Configs    = (*Store)(nil)
+	_ Repository = (*Store)(nil)
+)
 
 // NewStore returns the model store. v validates configs on create.
 func NewStore(pool *pgxpool.Pool, v Validator) *Store {
@@ -146,8 +149,11 @@ func (s *Store) List(ctx context.Context, model string) ([]ConfigVersion, error)
 	return out, nil
 }
 
-// Create applies patch to version base (0 = the active version), validates
-// the result and stores it as the next version, status draft.
+// Create applies patch to version base (0 = the active version) and stores
+// the result as the next version, status draft. The patched config must
+// decode, but need not validate: a draft can be fixed by a later patch and
+// is still usable for what-if runs; Validate reports its problems and
+// Activate refuses it.
 func (s *Store) Create(ctx context.Context, tx pgx.Tx, model string, base int, patch []PatchOp, note string, actorID int64) (ConfigVersion, error) {
 	var from ConfigVersion
 	var err error
@@ -163,12 +169,28 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, model string, base int, p
 	if err != nil {
 		return ConfigVersion{}, err
 	}
-	return s.insertConfig(ctx, tx, model, 0, next, ConfigDraft, note, actorID)
+	return s.insertConfig(ctx, tx, model, 0, next, ConfigDraft, note, actorID, false)
 }
 
-func (s *Store) insertConfig(ctx context.Context, tx pgx.Tx, model string, version int, c Config, status ConfigStatus, note string, actorID int64) (ConfigVersion, error) {
-	if err := s.validator.Validate(ctx, c); err != nil {
-		return ConfigVersion{}, err
+// ValidateConfig checks a config with the store's validator.
+func (s *Store) ValidateConfig(ctx context.Context, c Config) error {
+	return s.validator.Validate(ctx, c)
+}
+
+// ValidateVersion checks a stored config version.
+func (s *Store) ValidateVersion(ctx context.Context, model string, version int) error {
+	cv, err := s.Get(ctx, model, version)
+	if err != nil {
+		return err
+	}
+	return s.validator.Validate(ctx, cv.Config)
+}
+
+func (s *Store) insertConfig(ctx context.Context, tx pgx.Tx, model string, version int, c Config, status ConfigStatus, note string, actorID int64, validate bool) (ConfigVersion, error) {
+	if validate {
+		if err := s.validator.Validate(ctx, c); err != nil {
+			return ConfigVersion{}, err
+		}
 	}
 	q := s.q.WithTx(tx)
 	mid, err := q.GetModelID(ctx, model)
@@ -198,7 +220,8 @@ func (s *Store) insertConfig(ctx context.Context, tx pgx.Tx, model string, versi
 	return ConfigVersion{ID: r.ID, ModelKey: model, Version: version, Status: status, Config: c, Note: note, CreatedBy: by, CreatedAt: r.CreatedAt}, nil
 }
 
-// Activate makes version the active config, retiring the current one.
+// Activate makes version the active config, retiring the current one. A
+// config that does not validate is refused.
 func (s *Store) Activate(ctx context.Context, tx pgx.Tx, model string, version int) error {
 	q := s.q.WithTx(tx)
 	mid, err := q.GetModelID(ctx, model)
@@ -208,6 +231,17 @@ func (s *Store) Activate(ctx context.Context, tx pgx.Tx, model string, version i
 	cur, err := s.Active(ctx, model)
 	if err == nil && cur.Version == version {
 		return nil
+	}
+	r, err := q.GetConfig(ctx, db.GetConfigParams{ModelKey: model, Version: int32(version)}) //nolint:gosec // small
+	if err != nil {
+		return noRows(err, fmt.Sprintf("config %s v%d", model, version))
+	}
+	var c Config
+	if err := json.Unmarshal(r.Config, &c); err != nil {
+		return err
+	}
+	if err := s.validator.Validate(ctx, c); err != nil {
+		return err
 	}
 	if err := q.RetireActiveConfig(ctx, mid); err != nil {
 		return err
@@ -264,7 +298,7 @@ func (s *Store) SeedConfig(ctx context.Context, tx pgx.Tx, model, name string, v
 	if active, err := q.ActiveConfig(ctx, model); err == nil && int(active.Version) > version {
 		return false, apperr.New(apperr.Conflict, fmt.Sprintf("model %s already runs v%d, newer than seed v%d", model, active.Version, version))
 	}
-	if _, err := s.insertConfig(ctx, tx, model, version, c, ConfigDraft, note, actorID); err != nil {
+	if _, err := s.insertConfig(ctx, tx, model, version, c, ConfigDraft, note, actorID, true); err != nil {
 		return false, err
 	}
 	return true, s.Activate(ctx, tx, model, version)
@@ -543,7 +577,7 @@ func (s *Store) CreateRun(ctx context.Context, tx pgx.Tx, r Run, in EvalInput, r
 			return Run{}, err
 		}
 	}
-	r.ID, r.UUID, r.CreatedAt, r.DerivationHash = row.ID, row.Uuid, row.CreatedAt, hash
+	r.ID, r.UUID, r.CreatedAt, r.DerivationHash, r.RiskProfileID = row.ID, row.Uuid, row.CreatedAt, hash, in.Profile.ID
 	r.RiskProfileKey, r.AsOf, r.KnowledgeCutoff, r.Params, r.Warnings = in.Profile.Key, in.AsOf, in.Cutoff, in.Params, warnings
 	return r, nil
 }
@@ -551,7 +585,7 @@ func (s *Store) CreateRun(ctx context.Context, tx pgx.Tx, r Run, in EvalInput, r
 func toRun(r db.GetRunRow) (Run, error) {
 	run := Run{ID: r.ID, UUID: r.Uuid, ModelKey: r.ModelKey, ConfigVersion: int(r.ConfigVersion), RiskProfileKey: r.RiskProfileKey,
 		AsOf: fromPGDate(r.AsOf), KnowledgeCutoff: r.KnowledgeCutoff, Status: RunStatus(r.Status), JobRunID: r.JobRunID,
-		CreatedBy: r.CreatedBy, ApprovedBy: r.ApprovedBy, CreatedAt: r.CreatedAt, ApprovedAt: r.ApprovedAt, DerivationHash: r.DerivationHash}
+		CreatedBy: r.CreatedBy, ApprovedBy: r.ApprovedBy, CreatedAt: r.CreatedAt, ApprovedAt: r.ApprovedAt, DerivationHash: r.DerivationHash, RiskProfileID: r.RiskProfileID}
 	var rec RunRecord
 	if err := json.Unmarshal(r.Params, &rec); err != nil {
 		return run, err
@@ -607,6 +641,15 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) (paging.Page[Run], er
 		page.Items = append(page.Items, run)
 	}
 	return page, nil
+}
+
+// CurrentRun returns the published run for a model and risk profile.
+func (s *Store) CurrentRun(ctx context.Context, model, profile string) (Run, error) {
+	id, err := s.q.CurrentRun(ctx, db.CurrentRunParams{ModelKey: model, ProfileKey: profile})
+	if err != nil {
+		return Run{}, noRows(err, fmt.Sprintf("published run for %s/%s", model, profile))
+	}
+	return s.GetRun(ctx, id)
 }
 
 // RunValues returns a run's nodes, optionally one step's ("input" for the
@@ -755,7 +798,8 @@ func (s *Store) ActiveOverrides(ctx context.Context, model string, asOf civil.Da
 	out := make([]NodeOverride, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, NodeOverride{ID: r.Uuid, NodeKey: r.NodeKey, AsOf: fromPGDate(r.AsOf),
-			Value: datapoints.Value{Num: r.ValueNum, Bool: r.ValueBool}, Reason: r.Reason, ActorID: r.ActorID, ValidUntil: fromPGDatePtr(r.ValidUntil)})
+			Value: datapoints.Value{Num: r.ValueNum, Bool: r.ValueBool}, Reason: r.Reason, ActorID: r.ActorID, ValidUntil: fromPGDatePtr(r.ValidUntil),
+			CreatedAt: r.CreatedAt})
 	}
 	return out, nil
 }
@@ -773,7 +817,7 @@ func (s *Store) CreateOverride(ctx context.Context, tx pgx.Tx, model string, o N
 	if err != nil {
 		return NodeOverride{}, noRows(err, "model "+model)
 	}
-	id, err := q.InsertOverride(ctx, db.InsertOverrideParams{ModelID: mid, NodeKey: o.NodeKey, AsOf: pgDate(o.AsOf),
+	row, err := q.InsertOverride(ctx, db.InsertOverrideParams{ModelID: mid, NodeKey: o.NodeKey, AsOf: pgDate(o.AsOf),
 		ValueNum: o.Value.Num, ValueBool: o.Value.Bool, Reason: o.Reason, ActorID: o.ActorID, ValidUntil: pgDatePtr(o.ValidUntil)})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23514" {
@@ -782,7 +826,7 @@ func (s *Store) CreateOverride(ctx context.Context, tx pgx.Tx, model string, o N
 	if err != nil {
 		return NodeOverride{}, err
 	}
-	o.ID = id
+	o.ID, o.CreatedAt = row.Uuid, row.CreatedAt
 	return o, nil
 }
 

@@ -50,7 +50,7 @@ LIMIT 20`
 SELECT count(*), count(*) FILTER (WHERE d.inputs IS NULL OR cardinality(d.inputs) = 0)
 FROM dp.datapoints d JOIN catalog.sources src ON src.id = d.source_id JOIN catalog.series s ON s.id = d.series_id
 WHERE src.key = 'computed' AND d.status = 'active'
-  AND NOT (s.derivation->>'fn' = 'const' AND s.derivation->'inputs' = '{}'::jsonb)`).Scan(&total, &noLineage); err != nil {
+  AND NOT coalesce(s.derivation->>'fn' = 'const' AND s.derivation->'inputs' = '{}'::jsonb, false)`).Scan(&total, &noLineage); err != nil {
 		t.Fatal(err)
 	}
 	if noLineage > 0 {

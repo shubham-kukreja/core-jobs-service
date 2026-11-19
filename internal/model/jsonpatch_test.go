@@ -62,7 +62,9 @@ func TestApplyPatch(t *testing.T) {
 		{[]PatchOp{op("test", "/missing_score", "40")}, "test_failed"},
 		{[]PatchOp{op("replace", "/nope", "1")}, "not_found"},
 		{[]PatchOp{op("remove", "/steps/99", "")}, "not_found"},
-		{[]PatchOp{op("move", "/steps/0", `"x"`)}, "unsupported_op"},
+		{[]PatchOp{op("move", "/steps/0", "")}, "invalid_pointer"},
+		{[]PatchOp{op("frobnicate", "/steps/0", `"x"`)}, "unsupported_op"},
+		{[]PatchOp{{Op: "move", From: "/scorecards", Path: "/scorecards/x"}}, "invalid_pointer"},
 		{[]PatchOp{op("replace", "steps", `[]`)}, "invalid_pointer"},
 		{[]PatchOp{op("replace", "/steps", "")}, "value_required"},
 		{[]PatchOp{op("add", "/unknown_field", "1")}, "invalid_config"},
@@ -75,6 +77,18 @@ func TestApplyPatch(t *testing.T) {
 			t.Errorf("%+v: want %s, got %v", b.ops, b.reason, err)
 		}
 	}
+	// move and copy.
+	mc, err := ApplyPatch(c, []PatchOp{
+		{Op: "copy", From: "/scorecards/debt/vetoes", Path: "/scorecards/metals/vetoes"},
+		{Op: "move", From: "/steps/7", Path: "/steps/0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(mc.Scorecards["metals"].Vetoes, c.Scorecards["debt"].Vetoes) || mc.Steps[0] != "rollup" || len(mc.Steps) != 8 {
+		t.Fatalf("move/copy = %v %v", mc.Steps, mc.Scorecards["metals"].Vetoes)
+	}
+
 	// The failing operation's index is reported.
 	_, err = ApplyPatch(c, []PatchOp{op("test", "/missing_score", "50"), op("replace", "/nope", "1")})
 	if e, _ := apperr.As(err); e == nil || e.Details[0].Index == nil || *e.Details[0].Index != 1 {

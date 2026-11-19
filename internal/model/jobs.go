@@ -299,16 +299,37 @@ func EvaluateVetoes(ctx context.Context, d JobDeps, a VetoArgs, jobRunID *int64)
 	if len(pts) == 0 {
 		return res, nil
 	}
+	meta := datapoints.WriteMeta{Source: "computed", JobRunID: jobRunID, Origin: datapoints.OriginCascade}
 	err = database.InTx(ctx, d.DB, func(tx pgx.Tx) error {
-		w, err := d.Writer.Write(ctx, tx, datapoints.WriteMeta{Source: "computed", JobRunID: jobRunID, Origin: datapoints.OriginCascade}, pts)
+		w, err := d.Writer.Write(ctx, tx, meta, pts)
 		if err != nil {
 			return err
 		}
-		if len(w.Rejected) > 0 {
-			rj := w.Rejected[0]
-			return apperr.New(apperr.InvalidParams, fmt.Sprintf("veto %s rejected: %s %s", rj.SeriesKey, rj.Reason, rj.Message))
+		// A changed veto whose triggers' known_at equals the stored row's
+		// (more triggers arrived in the same batch) is knowable now, as in
+		// the cascade.
+		var retry []datapoints.Point
+		for _, rj := range w.Rejected {
+			if rj.Reason != datapoints.ReasonDuplicateKnownAt {
+				return apperr.New(apperr.InvalidParams, fmt.Sprintf("veto %s rejected: %s %s", rj.SeriesKey, rj.Reason, rj.Message))
+			}
+			p := pts[rj.Index]
+			p.KnownAt = d.Clock.Now()
+			retry = append(retry, p)
 		}
 		res.Written = w.Written
+		if len(retry) == 0 {
+			return nil
+		}
+		w2, err := d.Writer.Write(ctx, tx, meta, retry)
+		if err != nil {
+			return err
+		}
+		if len(w2.Rejected) > 0 {
+			rj := w2.Rejected[0]
+			return apperr.New(apperr.InvalidParams, fmt.Sprintf("veto %s rejected: %s %s", rj.SeriesKey, rj.Reason, rj.Message))
+		}
+		res.Written += w2.Written
 		return nil
 	})
 	return res, err

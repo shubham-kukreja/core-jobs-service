@@ -116,6 +116,13 @@ WHERE (sqlc.narg(model_key)::text IS NULL OR m.key = sqlc.narg(model_key))
 ORDER BY r.id DESC
 LIMIT @lim;
 
+-- name: CurrentRun :one
+SELECT r.uuid FROM model.model_runs r
+JOIN model.models m ON m.id = r.model_id
+JOIN model.risk_profiles rp ON rp.id = r.risk_profile_id
+WHERE m.key = @model_key AND rp.key = @profile_key AND r.status = 'published'
+ORDER BY r.id DESC LIMIT 1;
+
 -- name: RunValues :many
 SELECT node_key, value_num, value_bool, step, inputs, is_override FROM model.run_values
 WHERE run_id = @run_id AND (sqlc.narg(step)::text IS NULL OR step = sqlc.narg(step))
@@ -152,7 +159,7 @@ LIMIT @lim;
 -- Overrides ------------------------------------------------------------------
 
 -- name: ActiveOverrides :many
-SELECT o.uuid, o.node_key, o.as_of, o.value_num, o.value_bool, o.reason, o.actor_id, o.valid_until
+SELECT o.uuid, o.node_key, o.as_of, o.value_num, o.value_bool, o.reason, o.actor_id, o.valid_until, o.created_at
 FROM model.node_overrides o JOIN model.models m ON m.id = o.model_id
 WHERE m.key = @model_key AND o.deleted_at IS NULL
   AND o.as_of <= @as_of AND (o.valid_until IS NULL OR o.valid_until >= @as_of)
@@ -161,7 +168,7 @@ ORDER BY o.node_key, o.as_of DESC, o.id DESC;
 -- name: InsertOverride :one
 INSERT INTO model.node_overrides (model_id, node_key, as_of, value_num, value_bool, reason, actor_id, valid_until)
 VALUES (@model_id, @node_key, @as_of, @value_num, @value_bool, @reason, @actor_id, @valid_until)
-RETURNING uuid;
+RETURNING uuid, created_at;
 
 -- name: DeleteOverride :execrows
 UPDATE model.node_overrides SET deleted_at = now(), deleted_by = @actor_id

@@ -112,11 +112,13 @@ type ConfigVersion struct {
 type PatchOp struct {
 	Op    string          `json:"op"`
 	Path  string          `json:"path"`
+	From  string          `json:"from,omitempty"` // move and copy
 	Value json.RawMessage `json:"value,omitempty"`
 }
 
-// Configs stores versioned configs. Create validates; Activate retires the
-// previously active version in the same transaction.
+// Configs stores versioned configs. Create stores a draft (validation is
+// reported separately); Activate validates and retires the previously
+// active version in the same transaction.
 type Configs interface {
 	Get(ctx context.Context, model string, version int) (ConfigVersion, error)
 	Active(ctx context.Context, model string) (ConfigVersion, error)
@@ -124,6 +126,31 @@ type Configs interface {
 	Create(ctx context.Context, tx pgx.Tx, model string, base int, patch []PatchOp, note string, actorID int64) (ConfigVersion, error)
 	Activate(ctx context.Context, tx pgx.Tx, model string, version int) error
 	Diff(ctx context.Context, model string, from, to int) ([]PatchOp, error)
+}
+
+// Repository is what the API reads and writes for models: configs, risk
+// profiles, runs and overrides. *Store implements it.
+type Repository interface {
+	Configs
+	// ValidateVersion checks a stored config: nil, or validation_failed
+	// with a JSON pointer per problem.
+	ValidateVersion(ctx context.Context, model string, version int) error
+	ValidateConfig(ctx context.Context, c Config) error
+	GetProfile(ctx context.Context, key string) (RiskProfile, error)
+	ProfileByID(ctx context.Context, id int64) (RiskProfile, error)
+	ListProfiles(ctx context.Context) ([]RiskProfile, error)
+	SaveProfile(ctx context.Context, tx pgx.Tx, p RiskProfile) (RiskProfile, error)
+	GetRun(ctx context.Context, id uuid.UUID) (Run, error)
+	ListRuns(ctx context.Context, f RunFilter) (paging.Page[Run], error)
+	// CurrentRun is the published run for a model and risk profile.
+	CurrentRun(ctx context.Context, model, profile string) (Run, error)
+	RunValues(ctx context.Context, id uuid.UUID, step string) ([]Node, error)
+	Allocation(ctx context.Context, id uuid.UUID) ([]AllocationLine, error)
+	Approve(ctx context.Context, tx pgx.Tx, id uuid.UUID, actorID int64, note string) error
+	Publish(ctx context.Context, tx pgx.Tx, id uuid.UUID, actorID int64) error
+	ActiveOverrides(ctx context.Context, model string, asOf civil.Date) ([]NodeOverride, error)
+	CreateOverride(ctx context.Context, tx pgx.Tx, model string, o NodeOverride) (NodeOverride, error)
+	DeleteOverride(ctx context.Context, tx pgx.Tx, id uuid.UUID, actorID int64) error
 }
 
 // Validator checks a config: weights sum to 1, referenced steps and
@@ -191,6 +218,7 @@ type NodeOverride struct {
 	Reason     string
 	ActorID    int64
 	ValidUntil *civil.Date
+	CreatedAt  time.Time
 }
 
 // EvalInput is everything Evaluate needs. It is a value: Evaluate never reads
@@ -331,6 +359,7 @@ type Run struct {
 	KnowledgeCutoff time.Time
 	Params          Params
 	Status          RunStatus
+	RiskProfileID   int64
 	Warnings        []Warning
 	// DerivationHash is InputHash of the run's EvalInput: equal hashes mean
 	// equal results.

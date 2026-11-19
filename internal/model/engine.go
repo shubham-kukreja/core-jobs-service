@@ -211,3 +211,26 @@ func tiltOf(composite, limit float64, veto bool) float64 {
 	}
 	return t
 }
+
+// LineOrder lists allocation line items in rollup order: each root bucket's
+// child buckets, then its sectors; a root bucket with no children is its
+// own line.
+func LineOrder(c Config) []string {
+	_, root := rootScorecard(c)
+	var out []string
+	for _, g := range root.Buckets {
+		n := len(out)
+		for _, name := range scorecardOrder(c) {
+			if sc := c.Scorecards[name]; sc.Parent == g {
+				out = append(out, sc.Buckets...)
+			}
+		}
+		if sat := c.SectorSatellite; sat != nil && sat.Parent == g {
+			out = append(out, sat.Sectors...)
+		}
+		if len(out) == n {
+			out = append(out, g)
+		}
+	}
+	return out
+}

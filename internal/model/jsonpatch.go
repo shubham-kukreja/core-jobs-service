@@ -15,7 +15,8 @@ import (
 // maxPatchOps bounds one config edit.
 const maxPatchOps = 200
 
-// ApplyPatch applies RFC 6902 operations (add, remove, replace, test) to a
+// ApplyPatch applies RFC 6902 operations (add, remove, replace, move, copy,
+// test) to a
 // config and decodes the result strictly. Errors are validation_failed with
 // the failing operation's path.
 func ApplyPatch(c Config, ops []PatchOp) (Config, error) {
@@ -77,6 +78,29 @@ func applyOp(doc any, op PatchOp) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if op.Op == "move" || op.Op == "copy" {
+		from, err := parsePointer(op.From)
+		if err != nil || len(from) == 0 {
+			return nil, patchErr(op.From, "invalid_pointer", op.Op+" needs a from path below the root")
+		}
+		if op.Op == "move" && strings.HasPrefix(op.Path+"/", op.From+"/") {
+			return nil, patchErr(op.Path, "invalid_pointer", "Cannot move a value into itself")
+		}
+		v, err := walk(doc, from, op.From)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		if op.Op == "move" {
+			if doc, err = applyOp(doc, PatchOp{Op: "remove", Path: op.From}); err != nil {
+				return nil, err
+			}
+		}
+		return applyOp(doc, PatchOp{Op: "add", Path: op.Path, Value: raw})
+	}
 	var val any
 	if op.Op != "remove" {
 		if len(op.Value) == 0 {
@@ -123,7 +147,7 @@ func applyOp(doc any, op PatchOp) (any, error) {
 				return nil, patchErr(op.Path, "test_failed", "Test failed at "+op.Path)
 			}
 		default:
-			return nil, patchErr(op.Path, "unsupported_op", "Supported ops: add, remove, replace, test")
+			return nil, patchErr(op.Path, "unsupported_op", "Supported ops: add, remove, replace, move, copy, test")
 		}
 		return doc, nil
 	case []any:
@@ -149,7 +173,7 @@ func applyOp(doc any, op PatchOp) (any, error) {
 			}
 			return doc, nil
 		default:
-			return nil, patchErr(op.Path, "unsupported_op", "Supported ops: add, remove, replace, test")
+			return nil, patchErr(op.Path, "unsupported_op", "Supported ops: add, remove, replace, move, copy, test")
 		}
 		return setAt(doc, path[:len(path)-1], next)
 	}

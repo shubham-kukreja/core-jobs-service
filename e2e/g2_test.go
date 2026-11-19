@@ -524,6 +524,12 @@ func TestG2ImportComputeNoLookAheadReimport(t *testing.T) {
 	}
 
 	// 3. No computed value uses future data.
+	// Trigger writes enqueue veto.evaluate (Phase 3): its veto.* rows carry
+	// lineage to the triggers and are part of the look-ahead check below.
+	if n := g.count(ctx, t, `SELECT count(*) FROM dp.datapoints d JOIN catalog.series s ON s.id = d.series_id WHERE s.layer = 'veto'`); n == 0 {
+		t.Error("no veto rows written from the imported triggers")
+	}
+
 	n := assertNoLookAhead(ctx, t, g.db.Owner)
 	t.Logf("look-ahead check covered %d computed rows", n)
 	if n < 1000 {

@@ -23,6 +23,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/derive"
 	"github.com/shubham-kukreja/core-jobs-service/internal/ingest"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
+	"github.com/shubham-kukreja/core-jobs-service/internal/model"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/database"
@@ -80,6 +81,7 @@ type Deps struct {
 	Reader      datapoints.Reader
 	Writer      datapoints.Writer
 	Explainer   derive.Explainer
+	Models      model.Repository
 	Rebuilds    Rebuilder
 	Idempotency IdempotencyStore
 	Connectors  ConnectorLookup
@@ -104,6 +106,7 @@ type Server struct {
 	reader        datapoints.Reader
 	writer        datapoints.Writer
 	explainer     derive.Explainer
+	models        model.Repository
 	rebuilds      Rebuilder
 	idem          IdempotencyStore
 	connectors    ConnectorLookup
@@ -129,7 +132,7 @@ func New(cfg Config, d Deps) (http.Handler, error) {
 
 func newServer(cfg Config, d Deps) (*Server, error) {
 	if d.DB == nil || d.Auth == nil || d.Users == nil || d.Audit == nil || d.Catalog == nil ||
-		d.Reader == nil || d.Writer == nil || d.Explainer == nil || d.Rebuilds == nil || d.Idempotency == nil || d.Clock == nil ||
+		d.Reader == nil || d.Writer == nil || d.Explainer == nil || d.Models == nil || d.Rebuilds == nil || d.Idempotency == nil || d.Clock == nil ||
 		d.Jobs.Jobs == nil || d.Jobs.Runs == nil || d.Jobs.Schedules == nil || d.Jobs.Kinds == nil {
 		return nil, errors.New("api: missing dependency")
 	}
@@ -151,7 +154,7 @@ func newServer(cfg Config, d Deps) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg, db: d.DB, auth: d.Auth, users: d.Users, audit: d.Audit, catalog: d.Catalog,
-		reader: d.Reader, writer: d.Writer, explainer: d.Explainer, rebuilds: d.Rebuilds, idem: d.Idempotency, connectors: d.Connectors, jobs: d.Jobs,
+		reader: d.Reader, writer: d.Writer, explainer: d.Explainer, models: d.Models, rebuilds: d.Rebuilds, idem: d.Idempotency, connectors: d.Connectors, jobs: d.Jobs,
 		clock: d.Clock, log: d.Log, cursors: cursors, cop: cop,
 		ipLimiter: d.IPLimiter, userLimiter: d.UserLimiter, loginLimiter: d.LoginLimiter, loginFailures: d.LoginFailures,
 	}
@@ -244,6 +247,28 @@ func (s *Server) routes() http.Handler {
 			r.Get("/schedules/{id}/preview", s.requireRole(v, s.previewSchedule))
 
 			r.Get("/quality/report", s.requireRole(v, s.getQualityReport))
+
+			r.Get("/models/{model}/configs", s.requireRole(v, s.listModelConfigs))
+			r.Post("/models/{model}/configs", s.requireRole(admin, s.createModelConfig))
+			r.Get("/models/{model}/configs/diff", s.requireRole(v, s.diffModelConfigs))
+			r.Get("/models/{model}/configs/{version}", s.requireRole(v, s.getModelConfig))
+			r.Post("/models/{model}/configs/{version}/validate", s.requireRole(admin, s.validateModelConfig))
+			r.Post("/models/{model}/configs/{version}/activate", s.requireRole(admin, s.activateModelConfig))
+			r.Post("/models/{model}/overrides", s.requireRole(admin, s.createNodeOverride))
+			r.Delete("/models/{model}/overrides/{id}", s.requireRole(admin, s.deleteNodeOverride))
+			r.Get("/runs", s.requireRole(v, s.listRuns))
+			r.Get("/runs/compare", s.requireRole(v, s.compareRuns))
+			r.Get("/runs/{id}", s.requireRole(v, s.getRun))
+			r.Get("/runs/{id}/values", s.requireRole(v, s.listRunValues))
+			r.Get("/runs/{id}/values/{node_key}/lineage", s.requireRole(v, s.getRunValueLineage))
+			r.Get("/runs/{id}/allocations", s.requireRole(v, s.getRunAllocations))
+			r.Post("/runs/{id}/approve", s.requireRole(a, s.approveRun))
+			r.Post("/runs/{id}/publish", s.requireRole(admin, s.publishRun))
+			r.Get("/allocations/current", s.requireRole(v, s.getCurrentAllocation))
+			r.Get("/risk-profiles", s.requireRole(v, s.listRiskProfiles))
+			r.Post("/risk-profiles", s.requireRole(admin, s.createRiskProfile))
+			r.Get("/risk-profiles/{key}", s.requireRole(v, s.getRiskProfile))
+			r.Patch("/risk-profiles/{key}", s.requireRole(admin, s.updateRiskProfile))
 		})
 	})
 	return r

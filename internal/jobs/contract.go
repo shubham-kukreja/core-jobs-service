@@ -21,6 +21,13 @@ import (
 // Args is a job's JSON-serialisable arguments. Add fields, never rename.
 type Args interface{ Kind() string }
 
+// ArgsRole is implemented by args that need a higher role than their kind's
+// Roles for some values, e.g. model.run with publish: true (admin). An
+// empty MinRole means the kind's roles suffice.
+type ArgsRole interface {
+	MinRole() string
+}
+
 // TriggerType is what started a job.
 type TriggerType string
 

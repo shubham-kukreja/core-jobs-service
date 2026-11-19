@@ -306,6 +306,10 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, apperr.Wrap(err, apperr.ValidationFailed, "Invalid job args"))
 		return
 	}
+	if ar, ok := args.(jobs.ArgsRole); ok && ar.MinRole() != "" && !allowedRole(p.Role, []string{ar.MinRole()}) {
+		s.writeError(w, r, apperr.New(apperr.Forbidden, "Your role cannot start this job with these arguments"))
+		return
+	}
 	s.mutate(w, r, body, func(ctx context.Context, tx pgx.Tx) (txResult, error) {
 		ref, err := s.jobs.Jobs.EnqueueTx(ctx, tx, args, jobs.WithTrigger(jobs.TriggerUser), jobs.WithUser(p.UserID))
 		if err != nil {
