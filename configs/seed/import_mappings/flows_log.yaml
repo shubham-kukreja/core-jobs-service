@@ -1,0 +1,17 @@
+# Data Trackers – category flow log (AMFI monthly net flows, INR crore).
+# AMFI publishes around the 10th of the following month. The sheet's flow
+# %iles rank raw crore; the system ranks 3M average flows as % of AUM instead.
+key: data_trackers.flows
+name: Data Trackers – category flow log
+mapping:
+  sheet: Data Trackers
+  header_row_match: Month
+  date_column: {name: Month, format: Jan-2006, obs_date: month_end}
+  columns:
+    - {name: "Large Cap", series: flows.large}
+    - {name: "Mid Cap", series: flows.mid}
+    - {name: "Small Cap", series: flows.small}
+    - {name: "Sectoral/Thematic", series: flows.sectoral}
+    - {name: "Gold ETF", series: flows.gold_etf}
+  ignore_columns: ["Small Flow %ile", "Sectoral Flow %ile"]
+  known_at: "obs_date_plus_days:10"

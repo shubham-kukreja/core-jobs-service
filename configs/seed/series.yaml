@@ -1,43 +1,825 @@
-# Abridged: the full workbook list lands in P2-T7-03.
-- {key: pe.nifty50, name: Nifty 50 trailing P/E, entity: idx.nifty50, layer: raw, value_type: num, unit: x, frequency: daily, validation: {min: 0, max: 200}}
-- {key: pe.nifty100, name: Nifty 100 P/E, entity: idx.nifty100, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
-- {key: pe.midcap150, name: Nifty Midcap 150 P/E, entity: idx.midcap150, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
-- {key: yield.gsec10y, name: 10Y G-sec yield, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
-- {key: yield.aaa3y, name: 3Y AAA corporate yield, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
-- {key: gold.inr10g, name: Gold price, entity: metals.gold, layer: raw, value_type: num, unit: INR/10g, frequency: monthly, validation: {min: 0}}
-- {key: silver.inrkg, name: Silver price, entity: metals.silver, layer: raw, value_type: num, unit: INR/kg, frequency: monthly, validation: {min: 0}}
-- key: judg.rbi.stance
-  name: RBI stance
-  layer: judgment
-  value_type: cat
-  allowed_values: [cutting, hold, hiking]
-  frequency: monthly
-- {key: spread.mid_large, name: Mid–Large P/E spread, entity: equity.mid, layer: derived, value_type: num, unit: x, frequency: monthly,
+# Every series of the Multi-Asset Allocation Framework v2 workbook.
+#
+# Source of truth: the workbook's Calculation Guide and Weights & Rules sheets.
+# The four Data Trackers logs (valuation, rates, metals, flows) are imported by
+# configs/seed/import_mappings/*_log.yaml; the "new columns" of the upload
+# template come in through extras_log.yaml. Everything the workbook computes
+# (spreads, ratios, returns, percentiles and all 85 scores) is derived here
+# point-in-time: a value at month d only reads observations dated <= d.
+#
+# Each derivation cites the guide row it implements. When a methodology change
+# is agreed, edit the derivation here and bump its `version` (a rebuild keeps
+# the old rows).
+#
+# Conventions
+#   percentiles  pctile.<window>m.<series>, Excel PERCENTRANK.INC x 100, null
+#                below the governance minimum (24 observations). 15Y windows
+#                unless the guide says otherwise (gold: 20Y).
+#   scores       <node>::<signal> (CORE keys), 0-100, higher = more attractive.
+#                "Inverted" = 100 - percentile (valuation, flows); yields,
+#                spreads, breadth and momentum are scored as-is.
+#   constants    tick on the 10Y G-sec log so they exist every month.
+#   missing      a score with a missing input is null; model.run scores it 50
+#                with a warning (Calculation Guide practical note 3).
+
+# ----------------------------------------------------------------------------
+# Raw: Data Trackers — equity valuation log
+# niftyindices.com; import_mappings/valuation_log.yaml
+# ----------------------------------------------------------------------------
+- {key: pe.nifty100, name: "Nifty 100 P/E", entity: idx.nifty100, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: pe.midcap150, name: "Nifty Midcap 150 P/E", entity: idx.midcap150, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: pe.smallcap250, name: "Nifty Smallcap 250 P/E", entity: idx.smallcap250, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+
+# ----------------------------------------------------------------------------
+# Raw: Data Trackers — rates & credit log
+# RBI/CCIL, FIMMDA; import_mappings/rates_log.yaml
+# ----------------------------------------------------------------------------
+- {key: yield.gsec10y, name: "10Y G-sec yield", layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+- {key: rate.repo, name: "Repo rate", layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+- {key: yield.aaa3y, name: "3Y AAA corporate yield", layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+
+# ----------------------------------------------------------------------------
+# Raw: Data Trackers — precious metals log
+# Bullion; import_mappings/metals_log.yaml
+# ----------------------------------------------------------------------------
+- {key: gold.inr10g, name: "Gold price", entity: metals.gold, layer: raw, value_type: num, unit: INR/10g, frequency: monthly, validation: {min: 0}}
+- {key: silver.inrkg, name: "Silver price", entity: metals.silver, layer: raw, value_type: num, unit: INR/kg, frequency: monthly, validation: {min: 0}}
+
+# ----------------------------------------------------------------------------
+# Raw: Data Trackers — category flow log
+# AMFI monthly net flows, INR crore; import_mappings/flows_log.yaml
+# ----------------------------------------------------------------------------
+- {key: flows.large, name: "Large Cap net flows", entity: equity.large, layer: raw, value_type: num, unit: "INR cr", frequency: monthly}
+- {key: flows.mid, name: "Mid Cap net flows", entity: equity.mid, layer: raw, value_type: num, unit: "INR cr", frequency: monthly}
+- {key: flows.small, name: "Small Cap net flows", entity: equity.small, layer: raw, value_type: num, unit: "INR cr", frequency: monthly}
+- {key: flows.sectoral, name: "Sectoral/Thematic net flows", layer: raw, value_type: num, unit: "INR cr", frequency: monthly}
+- {key: flows.gold_etf, name: "Gold ETF net flows", entity: metals.gold, layer: raw, value_type: num, unit: "INR cr", frequency: monthly}
+
+# ----------------------------------------------------------------------------
+# Raw: upload template new columns
+# import_mappings/extras_log.yaml (Extras sheet)
+# ----------------------------------------------------------------------------
+- {key: pe.nifty50, name: "Nifty 50 trailing P/E", entity: idx.nifty50, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: pe.nifty50_fwd, name: "Nifty 50 forward P/E", entity: idx.nifty50, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: pe.sp500_fwd, name: "S&P 500 forward P/E", entity: idx.sp500, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: tri.nifty50, name: "Nifty 50 total return index", entity: idx.nifty50, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: px.nifty50, name: "Nifty 50 price index", entity: idx.nifty50, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: val.sector.banking, name: "Banking index P/B", entity: sector.banking, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: val.sector.it, name: "IT Services index P/E", entity: sector.it, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: val.sector.pharma, name: "Pharma index P/E", entity: sector.pharma, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: val.sector.auto, name: "Auto index P/E", entity: sector.auto, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: val.sector.capgoods, name: "Capital Goods index P/E", entity: sector.capgoods, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: val.sector.fmcg, name: "FMCG index P/E", entity: sector.fmcg, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: val.sector.energy, name: "Energy index P/E", entity: sector.energy, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: val.sector.metals, name: "Metals & Mining index P/E", entity: sector.metals, layer: raw, value_type: num, unit: x, frequency: monthly, validation: {min: 0, max: 200}}
+- {key: px.sector.banking, name: "Banking price index", entity: sector.banking, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: px.sector.it, name: "IT Services price index", entity: sector.it, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: px.sector.pharma, name: "Pharma price index", entity: sector.pharma, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: px.sector.auto, name: "Auto price index", entity: sector.auto, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: px.sector.capgoods, name: "Capital Goods price index", entity: sector.capgoods, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: px.sector.fmcg, name: "FMCG price index", entity: sector.fmcg, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: px.sector.energy, name: "Energy price index", entity: sector.energy, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: px.sector.metals, name: "Metals & Mining price index", entity: sector.metals, layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: eps.fy1.large, name: "Large Cap consensus FY+1 EPS", entity: equity.large, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.mid, name: "Mid Cap consensus FY+1 EPS", entity: equity.mid, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.small, name: "Small Cap consensus FY+1 EPS", entity: equity.small, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.intl, name: "International consensus FY+1 EPS", entity: equity.intl, layer: raw, value_type: num, unit: USD, frequency: monthly}
+- {key: eps.fy1.sector.banking, name: "Banking consensus FY+1 EPS", entity: sector.banking, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.sector.it, name: "IT Services consensus FY+1 EPS", entity: sector.it, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.sector.pharma, name: "Pharma consensus FY+1 EPS", entity: sector.pharma, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.sector.auto, name: "Auto consensus FY+1 EPS", entity: sector.auto, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.sector.capgoods, name: "Capital Goods consensus FY+1 EPS", entity: sector.capgoods, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.sector.fmcg, name: "FMCG consensus FY+1 EPS", entity: sector.fmcg, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.sector.energy, name: "Energy consensus FY+1 EPS", entity: sector.energy, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: eps.fy1.sector.metals, name: "Metals & Mining consensus FY+1 EPS", entity: sector.metals, layer: raw, value_type: num, unit: INR, frequency: monthly}
+- {key: epsg.fy1.large, name: "Large Cap consensus FY+1 EPS growth", entity: equity.large, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -100, max: 1000}}
+- {key: epsg.fy1.mid, name: "Mid Cap consensus FY+1 EPS growth", entity: equity.mid, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -100, max: 1000}}
+- {key: epsg.fy1.small, name: "Small Cap consensus FY+1 EPS growth", entity: equity.small, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -100, max: 1000}}
+- {key: epsg.fy1.us, name: "US (S&P 500) consensus FY+1 EPS growth", entity: equity.intl, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -100, max: 1000}}
+- {key: margin.ebitda.large, name: "Large Cap aggregate EBITDA margin", entity: equity.large, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -100, max: 100}}
+- {key: margin.ebitda.mid, name: "Mid Cap aggregate EBITDA margin", entity: equity.mid, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -100, max: 100}}
+- {key: margin.ebitda.small, name: "Small Cap aggregate EBITDA margin", entity: equity.small, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -100, max: 100}}
+- {key: margin.ebitda.us, name: "US (S&P 500) aggregate EBITDA margin", entity: equity.intl, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -100, max: 100}}
+- {key: cpi.yoy, name: "CPI inflation YoY", layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -10, max: 50}}
+- {key: cpi.index, name: "CPI index", layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0}}
+- {key: tips.10y, name: "US 10Y real yield (TIPS, FRED DFII10)", layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 10}}
+- {key: pmi.global, name: "Global manufacturing PMI", layer: raw, value_type: num, unit: index, frequency: monthly, validation: {min: 0, max: 100}}
+- {key: flows.equity_active, name: "Active equity funds net flows", layer: raw, value_type: num, unit: "INR cr", frequency: monthly}
+- {key: flows.duration, name: "Duration funds net flows", entity: l1.debt, layer: raw, value_type: num, unit: "INR cr", frequency: monthly}
+- {key: flows.intl, name: "International FoFs net flows", entity: equity.intl, layer: raw, value_type: num, unit: "INR cr", frequency: monthly}
+- {key: aum.equity_active, name: "Active equity funds AUM", layer: raw, value_type: num, unit: "INR cr", frequency: monthly, validation: {min: 0}}
+- {key: aum.duration, name: "Duration funds AUM", entity: l1.debt, layer: raw, value_type: num, unit: "INR cr", frequency: monthly, validation: {min: 0}}
+- {key: aum.gold_etf, name: "Gold ETF AUM", entity: metals.gold, layer: raw, value_type: num, unit: "INR cr", frequency: monthly, validation: {min: 0}}
+- {key: aum.large, name: "Large Cap funds AUM", entity: equity.large, layer: raw, value_type: num, unit: "INR cr", frequency: monthly, validation: {min: 0}}
+- {key: aum.mid, name: "Mid Cap funds AUM", entity: equity.mid, layer: raw, value_type: num, unit: "INR cr", frequency: monthly, validation: {min: 0}}
+- {key: aum.small, name: "Small Cap funds AUM", entity: equity.small, layer: raw, value_type: num, unit: "INR cr", frequency: monthly, validation: {min: 0}}
+- {key: aum.intl, name: "International FoFs AUM", entity: equity.intl, layer: raw, value_type: num, unit: "INR cr", frequency: monthly, validation: {min: 0}}
+- {key: aum.sectoral, name: "Sectoral/Thematic funds AUM", layer: raw, value_type: num, unit: "INR cr", frequency: monthly, validation: {min: 0}}
+- {key: bondidx.ret12m, name: "Composite bond index 12M return", entity: l1.debt, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -50, max: 100}}
+- {key: yield.tbill1y, name: "1Y T-bill yield", entity: debt.liquid, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+- {key: ytm.short, name: "Short-duration category YTM", entity: debt.liquid, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+- {key: ytm.corporate, name: "Corporate bond category YTM", entity: debt.corporate, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+- {key: ytm.gilt, name: "Gilt / long category YTM", entity: debt.gilt, layer: raw, value_type: num, unit: "%", frequency: monthly, validation: {min: -5, max: 30}}
+
+# ----------------------------------------------------------------------------
+# Raw: analyst entry (no free feed)
+# Revision breadth: upgrade and downgrade counts per universe, monthly.
+# ----------------------------------------------------------------------------
+- {key: breadth.nifty100.up, name: "Nifty 100 EPS upgrades", entity: idx.nifty100, layer: raw, value_type: num, unit: count, frequency: monthly, validation: {min: 0}}
+- {key: breadth.nifty100.down, name: "Nifty 100 EPS downgrades", entity: idx.nifty100, layer: raw, value_type: num, unit: count, frequency: monthly, validation: {min: 0}}
+- {key: breadth.midcap150.up, name: "Midcap 150 EPS upgrades", entity: idx.midcap150, layer: raw, value_type: num, unit: count, frequency: monthly, validation: {min: 0}}
+- {key: breadth.midcap150.down, name: "Midcap 150 EPS downgrades", entity: idx.midcap150, layer: raw, value_type: num, unit: count, frequency: monthly, validation: {min: 0}}
+- {key: breadth.smallcap250.up, name: "Smallcap 250 EPS upgrades", entity: idx.smallcap250, layer: raw, value_type: num, unit: count, frequency: monthly, validation: {min: 0}}
+- {key: breadth.smallcap250.down, name: "Smallcap 250 EPS downgrades", entity: idx.smallcap250, layer: raw, value_type: num, unit: count, frequency: monthly, validation: {min: 0}}
+
+# ----------------------------------------------------------------------------
+# Judgments (analyst, categorical)
+# Rubric inputs from the Calculation Guide.
+# ----------------------------------------------------------------------------
+- {key: judg.rbi.stance, name: "RBI stance", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [cutting, hold, hiking]}
+- {key: judg.growth_vs_exp, name: "Growth vs expectations", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beat, in_line, miss]}
+- {key: judg.inflation_trend, name: "Inflation trajectory", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [falling, stable, rising]}
+- {key: judg.rbi_path, name: "Expected RBI path over 12M", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [cuts_gt50, cuts_25_50, hold, hikes_25_50, hikes_gt50]}
+- {key: judg.fiscal_supply, name: "G-sec supply / fiscal slippage risk", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [normal, heavy]}
+- {key: judg.inflation_vs_target, name: "Inflation vs target", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [below, at_or_above]}
+- {key: judg.credit_cycle, name: "Corporate credit cycle", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [quiet, normal, stress]}
+- {key: judg.system_liquidity, name: "Banking system liquidity", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [surplus, neutral, deficit]}
+- {key: judg.credit_fund_stress, name: "Credit-fund stress episode", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, stress]}
+- {key: judg.cb_gold_buying, name: "Central-bank gold buying vs 5Y average", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [above_avg, in_line, below_avg]}
+- {key: judg.gold_etf_holdings, name: "Global gold ETF holdings, 3M trend", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [rising, flat, falling]}
+- {key: judg.credit_growth, name: "Credit growth", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [accelerating, not_accelerating]}
+- {key: judg.capacity_util, name: "Capacity utilisation (RBI OBICUS)", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [above_75, at_or_below_75]}
+- {key: judg.solar_ev_flow, name: "Solar / EV capex news flow", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [strong, normal]}
+- {key: judg.results.sector.banking, name: "Banking results season", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beats, mixed, misses]}
+- {key: judg.results.sector.it, name: "IT Services results season", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beats, mixed, misses]}
+- {key: judg.results.sector.pharma, name: "Pharma results season", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beats, mixed, misses]}
+- {key: judg.results.sector.auto, name: "Auto results season", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beats, mixed, misses]}
+- {key: judg.results.sector.capgoods, name: "Capital Goods results season", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beats, mixed, misses]}
+- {key: judg.results.sector.fmcg, name: "FMCG results season", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beats, mixed, misses]}
+- {key: judg.results.sector.energy, name: "Energy results season", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beats, mixed, misses]}
+- {key: judg.results.sector.metals, name: "Metals & Mining results season", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [beats, mixed, misses]}
+- {key: judg.sector_cycle.banking, name: "Banking cycle position", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [turning_up, mid, late]}
+- {key: judg.sector_cycle.it, name: "IT Services cycle position", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [turning_up, mid, late]}
+- {key: judg.sector_cycle.pharma, name: "Pharma cycle position", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [turning_up, mid, late]}
+- {key: judg.sector_cycle.auto, name: "Auto cycle position", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [turning_up, mid, late]}
+- {key: judg.sector_cycle.capgoods, name: "Capital Goods cycle position", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [turning_up, mid, late]}
+- {key: judg.sector_cycle.fmcg, name: "FMCG cycle position", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [turning_up, mid, late]}
+- {key: judg.sector_cycle.energy, name: "Energy cycle position", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [turning_up, mid, late]}
+- {key: judg.sector_cycle.metals, name: "Metals & Mining cycle position", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [turning_up, mid, late]}
+- {key: judg.sector_overhang.banking, name: "Banking regulatory or disruption overhang", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, overhang]}
+- {key: judg.sector_overhang.it, name: "IT Services regulatory or disruption overhang", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, overhang]}
+- {key: judg.sector_overhang.pharma, name: "Pharma regulatory or disruption overhang", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, overhang]}
+- {key: judg.sector_overhang.auto, name: "Auto regulatory or disruption overhang", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, overhang]}
+- {key: judg.sector_overhang.capgoods, name: "Capital Goods regulatory or disruption overhang", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, overhang]}
+- {key: judg.sector_overhang.fmcg, name: "FMCG regulatory or disruption overhang", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, overhang]}
+- {key: judg.sector_overhang.energy, name: "Energy regulatory or disruption overhang", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, overhang]}
+- {key: judg.sector_overhang.metals, name: "Metals & Mining regulatory or disruption overhang", layer: judgment, value_type: cat, frequency: monthly, allowed_values: [none, overhang]}
+
+# ----------------------------------------------------------------------------
+# Derived: same-date arithmetic
+# ----------------------------------------------------------------------------
+- {key: spread.mid_large, name: "Mid–Large P/E spread", entity: equity.mid, layer: derived, value_type: num, unit: x, frequency: monthly,
    derivation: {fn: expr, inputs: {mid: pe.midcap150, large: pe.nifty100}, params: {expr: "mid - large"}, version: 1}}
-- {key: spread.aaa_bps, name: AAA spread, layer: derived, value_type: num, unit: bps, frequency: monthly,
+- {key: spread.small_large, name: "Small–Large P/E spread", entity: equity.small, layer: derived, value_type: num, unit: x, frequency: monthly,
+   derivation: {fn: expr, inputs: {small: pe.smallcap250, large: pe.nifty100}, params: {expr: "small - large"}, version: 1}}
+- {key: spread.aaa_bps, name: "AAA spread", entity: debt.corporate, layer: derived, value_type: num, unit: bps, frequency: monthly,
    derivation: {fn: expr, inputs: {aaa: yield.aaa3y, g: yield.gsec10y}, params: {expr: "(aaa - g) * 100"}, version: 1}}
-- {key: ratio.gold_silver, name: Gold/silver ratio, layer: derived, value_type: num, unit: x, frequency: monthly,
+- {key: ratio.gold_silver, name: "Gold/silver ratio", layer: derived, value_type: num, unit: x, frequency: monthly,
    derivation: {fn: expr, inputs: {gold: gold.inr10g, silver: silver.inrkg}, params: {expr: "gold * 100 / silver"}, version: 1}}
-- {key: gap.earnings_yield, name: Earnings-yield gap, layer: derived, value_type: num, unit: "%", frequency: monthly,
+- {key: gap.earnings_yield, name: "Earnings-yield gap (Nifty 50 vs 10Y)", entity: l1.equity, layer: derived, value_type: num, unit: "%", frequency: monthly,
    derivation: {fn: expr, inputs: {pe: pe.nifty50, y: yield.gsec10y}, params: {expr: "100 / pe - y"}, version: 1}}
-- {key: ret.gold.12m, name: Gold 12M return, entity: metals.gold, layer: window, value_type: num, unit: "%", frequency: monthly,
+- {key: yield.real10y, name: "Real 10Y yield", entity: l1.debt, layer: derived, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: expr, inputs: {y: yield.gsec10y, cpi: cpi.yoy}, params: {expr: "y - cpi"}, version: 1}}
+- {key: gold.real, name: "Real gold price (CPI-deflated)", entity: metals.gold, layer: derived, value_type: num, unit: index, frequency: monthly,
+   derivation: {fn: expr, inputs: {gold: gold.inr10g, cpi: cpi.index}, params: {expr: "gold * 100 / cpi"}, version: 1}}
+- {key: spread.us_india_fwdpe, name: "S&P 500 − Nifty 50 forward P/E", entity: equity.intl, layer: derived, value_type: num, unit: x, frequency: monthly,
+   derivation: {fn: expr, inputs: {us: pe.sp500_fwd, india: pe.nifty50_fwd}, params: {expr: "us - india"}, version: 1}}
+- {key: breadth.nifty100, name: "Nifty 100 revision breadth", entity: idx.nifty100, layer: derived, value_type: num, unit: ratio, frequency: monthly, validation: {min: 0, max: 1},
+   derivation: {fn: expr, inputs: {up: breadth.nifty100.up, down: breadth.nifty100.down}, params: {expr: "up / (up + down)"}, version: 1}}
+- {key: breadth.midcap150, name: "Midcap 150 revision breadth", entity: idx.midcap150, layer: derived, value_type: num, unit: ratio, frequency: monthly, validation: {min: 0, max: 1},
+   derivation: {fn: expr, inputs: {up: breadth.midcap150.up, down: breadth.midcap150.down}, params: {expr: "up / (up + down)"}, version: 1}}
+- {key: breadth.smallcap250, name: "Smallcap 250 revision breadth", entity: idx.smallcap250, layer: derived, value_type: num, unit: ratio, frequency: monthly, validation: {min: 0, max: 1},
+   derivation: {fn: expr, inputs: {up: breadth.smallcap250.up, down: breadth.smallcap250.down}, params: {expr: "up / (up + down)"}, version: 1}}
+- {key: epsg.gap.mid, name: "Mid − Large FY+1 EPS growth", entity: equity.mid, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {seg: epsg.fy1.mid, large: epsg.fy1.large}, params: {expr: "seg - large"}, version: 1}}
+- {key: epsg.gap.small, name: "Small − Large FY+1 EPS growth", entity: equity.small, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {seg: epsg.fy1.small, large: epsg.fy1.large}, params: {expr: "seg - large"}, version: 1}}
+- {key: epsg.gap.intl, name: "US − India FY+1 EPS growth", entity: equity.intl, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {us: epsg.fy1.us, india: epsg.fy1.large}, params: {expr: "us - india"}, version: 1}}
+- {key: cycle.domestic, name: "Domestic cycle rubric (mid/small margin half)", layer: derived, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {credit: judg.credit_growth, capacity: judg.capacity_util}, params: {base: 50, clamp: [0, 100], add: {credit: {accelerating: 10, not_accelerating: 0}, capacity: {above_75: 5, at_or_below_75: 0}}}, version: 1}}
+- {key: adj.solar_ev, name: "Solar/EV news-flow adjustment", layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.solar_ev_flow}, params: {categories: {strong: 5, normal: 0}}, version: 1}}
+- {key: adj.results.sector.banking, name: "Banking results-season adjustment", entity: sector.banking, layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.results.sector.banking}, params: {categories: {beats: 5, mixed: 0, misses: -5}}, version: 1}}
+- {key: adj.results.sector.it, name: "IT Services results-season adjustment", entity: sector.it, layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.results.sector.it}, params: {categories: {beats: 5, mixed: 0, misses: -5}}, version: 1}}
+- {key: adj.results.sector.pharma, name: "Pharma results-season adjustment", entity: sector.pharma, layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.results.sector.pharma}, params: {categories: {beats: 5, mixed: 0, misses: -5}}, version: 1}}
+- {key: adj.results.sector.auto, name: "Auto results-season adjustment", entity: sector.auto, layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.results.sector.auto}, params: {categories: {beats: 5, mixed: 0, misses: -5}}, version: 1}}
+- {key: adj.results.sector.capgoods, name: "Capital Goods results-season adjustment", entity: sector.capgoods, layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.results.sector.capgoods}, params: {categories: {beats: 5, mixed: 0, misses: -5}}, version: 1}}
+- {key: adj.results.sector.fmcg, name: "FMCG results-season adjustment", entity: sector.fmcg, layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.results.sector.fmcg}, params: {categories: {beats: 5, mixed: 0, misses: -5}}, version: 1}}
+- {key: adj.results.sector.energy, name: "Energy results-season adjustment", entity: sector.energy, layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.results.sector.energy}, params: {categories: {beats: 5, mixed: 0, misses: -5}}, version: 1}}
+- {key: adj.results.sector.metals, name: "Metals & Mining results-season adjustment", entity: sector.metals, layer: derived, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: bucket_map, inputs: {x: judg.results.sector.metals}, params: {categories: {beats: 5, mixed: 0, misses: -5}}, version: 1}}
+
+# ----------------------------------------------------------------------------
+# Window: changes, returns and flow averages
+# ----------------------------------------------------------------------------
+- {key: ret.nifty50tr.12m, name: "Nifty 50 TR 12M return", entity: idx.nifty50, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: tri.nifty50}, params: {months: 12}, version: 1}}
+- {key: excess.nifty50tr.12m, name: "Nifty 50 12M excess return over 10Y", entity: l1.equity, layer: derived, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: expr, inputs: {r: ret.nifty50tr.12m, y: yield.gsec10y}, params: {expr: "r - y"}, version: 1}}
+- {key: ret.gold.12m, name: "Gold 12M return", entity: metals.gold, layer: window, value_type: num, unit: "%", frequency: monthly,
    derivation: {fn: pct_change, inputs: {x: gold.inr10g}, params: {months: 12}, version: 1}}
-- {key: pctile.180m.spread.mid_large, name: Mid–Large spread percentile (15Y), entity: equity.mid, layer: percentile, value_type: num, unit: pctile,
-   frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+- {key: ret.gold.6m, name: "Gold 6M return", entity: metals.gold, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: gold.inr10g}, params: {months: 6}, version: 1}}
+- {key: ret.silver.6m, name: "Silver 6M return", entity: metals.silver, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: silver.inrkg}, params: {months: 6}, version: 1}}
+- {key: tips.10y.chg6m_bp, name: "US 10Y real yield 6M change", layer: window, value_type: num, unit: bps, frequency: monthly,
+   derivation: {fn: diff_over, inputs: {x: tips.10y}, params: {months: 6, scale: 100}, version: 1}}
+- {key: pmi.global.chg1m, name: "Global PMI 1M change", layer: window, value_type: num, unit: points, frequency: monthly,
+   derivation: {fn: diff_over, inputs: {x: pmi.global}, params: {months: 1}, version: 1}}
+- {key: ret.nifty50.6m, name: "Nifty 50 6M return", entity: idx.nifty50, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.nifty50}, params: {months: 6}, version: 1}}
+- {key: ret.nifty50.12m, name: "Nifty 50 12M return", entity: idx.nifty50, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.nifty50}, params: {months: 12}, version: 1}}
+- {key: ret.sector.banking.6m, name: "Banking 6M return", entity: sector.banking, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.banking}, params: {months: 6}, version: 1}}
+- {key: ret.sector.banking.12m, name: "Banking 12M return", entity: sector.banking, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.banking}, params: {months: 12}, version: 1}}
+- {key: relmom.sector.banking, name: "Banking relative momentum vs Nifty (6M/12M blend)", entity: sector.banking, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {s6: ret.sector.banking.6m, s12: ret.sector.banking.12m, n6: ret.nifty50.6m, n12: ret.nifty50.12m}, params: {expr: "((s6 - n6) + (s12 - n12)) / 2"}, version: 1}}
+- {key: ret.sector.it.6m, name: "IT Services 6M return", entity: sector.it, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.it}, params: {months: 6}, version: 1}}
+- {key: ret.sector.it.12m, name: "IT Services 12M return", entity: sector.it, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.it}, params: {months: 12}, version: 1}}
+- {key: relmom.sector.it, name: "IT Services relative momentum vs Nifty (6M/12M blend)", entity: sector.it, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {s6: ret.sector.it.6m, s12: ret.sector.it.12m, n6: ret.nifty50.6m, n12: ret.nifty50.12m}, params: {expr: "((s6 - n6) + (s12 - n12)) / 2"}, version: 1}}
+- {key: ret.sector.pharma.6m, name: "Pharma 6M return", entity: sector.pharma, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.pharma}, params: {months: 6}, version: 1}}
+- {key: ret.sector.pharma.12m, name: "Pharma 12M return", entity: sector.pharma, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.pharma}, params: {months: 12}, version: 1}}
+- {key: relmom.sector.pharma, name: "Pharma relative momentum vs Nifty (6M/12M blend)", entity: sector.pharma, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {s6: ret.sector.pharma.6m, s12: ret.sector.pharma.12m, n6: ret.nifty50.6m, n12: ret.nifty50.12m}, params: {expr: "((s6 - n6) + (s12 - n12)) / 2"}, version: 1}}
+- {key: ret.sector.auto.6m, name: "Auto 6M return", entity: sector.auto, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.auto}, params: {months: 6}, version: 1}}
+- {key: ret.sector.auto.12m, name: "Auto 12M return", entity: sector.auto, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.auto}, params: {months: 12}, version: 1}}
+- {key: relmom.sector.auto, name: "Auto relative momentum vs Nifty (6M/12M blend)", entity: sector.auto, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {s6: ret.sector.auto.6m, s12: ret.sector.auto.12m, n6: ret.nifty50.6m, n12: ret.nifty50.12m}, params: {expr: "((s6 - n6) + (s12 - n12)) / 2"}, version: 1}}
+- {key: ret.sector.capgoods.6m, name: "Capital Goods 6M return", entity: sector.capgoods, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.capgoods}, params: {months: 6}, version: 1}}
+- {key: ret.sector.capgoods.12m, name: "Capital Goods 12M return", entity: sector.capgoods, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.capgoods}, params: {months: 12}, version: 1}}
+- {key: relmom.sector.capgoods, name: "Capital Goods relative momentum vs Nifty (6M/12M blend)", entity: sector.capgoods, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {s6: ret.sector.capgoods.6m, s12: ret.sector.capgoods.12m, n6: ret.nifty50.6m, n12: ret.nifty50.12m}, params: {expr: "((s6 - n6) + (s12 - n12)) / 2"}, version: 1}}
+- {key: ret.sector.fmcg.6m, name: "FMCG 6M return", entity: sector.fmcg, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.fmcg}, params: {months: 6}, version: 1}}
+- {key: ret.sector.fmcg.12m, name: "FMCG 12M return", entity: sector.fmcg, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.fmcg}, params: {months: 12}, version: 1}}
+- {key: relmom.sector.fmcg, name: "FMCG relative momentum vs Nifty (6M/12M blend)", entity: sector.fmcg, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {s6: ret.sector.fmcg.6m, s12: ret.sector.fmcg.12m, n6: ret.nifty50.6m, n12: ret.nifty50.12m}, params: {expr: "((s6 - n6) + (s12 - n12)) / 2"}, version: 1}}
+- {key: ret.sector.energy.6m, name: "Energy 6M return", entity: sector.energy, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.energy}, params: {months: 6}, version: 1}}
+- {key: ret.sector.energy.12m, name: "Energy 12M return", entity: sector.energy, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.energy}, params: {months: 12}, version: 1}}
+- {key: relmom.sector.energy, name: "Energy relative momentum vs Nifty (6M/12M blend)", entity: sector.energy, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {s6: ret.sector.energy.6m, s12: ret.sector.energy.12m, n6: ret.nifty50.6m, n12: ret.nifty50.12m}, params: {expr: "((s6 - n6) + (s12 - n12)) / 2"}, version: 1}}
+- {key: ret.sector.metals.6m, name: "Metals & Mining 6M return", entity: sector.metals, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.metals}, params: {months: 6}, version: 1}}
+- {key: ret.sector.metals.12m, name: "Metals & Mining 12M return", entity: sector.metals, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: px.sector.metals}, params: {months: 12}, version: 1}}
+- {key: relmom.sector.metals, name: "Metals & Mining relative momentum vs Nifty (6M/12M blend)", entity: sector.metals, layer: derived, value_type: num, unit: pp, frequency: monthly,
+   derivation: {fn: expr, inputs: {s6: ret.sector.metals.6m, s12: ret.sector.metals.12m, n6: ret.nifty50.6m, n12: ret.nifty50.12m}, params: {expr: "((s6 - n6) + (s12 - n12)) / 2"}, version: 1}}
+- {key: eps.fy1.large.chg3m, name: "Large Cap consensus EPS 3M change", entity: equity.large, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.large}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.mid.chg3m, name: "Mid Cap consensus EPS 3M change", entity: equity.mid, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.mid}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.small.chg3m, name: "Small Cap consensus EPS 3M change", entity: equity.small, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.small}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.intl.chg3m, name: "International consensus EPS 3M change", entity: equity.intl, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.intl}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.sector.banking.chg3m, name: "Banking consensus EPS 3M change", entity: sector.banking, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.sector.banking}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.sector.it.chg3m, name: "IT Services consensus EPS 3M change", entity: sector.it, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.sector.it}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.sector.pharma.chg3m, name: "Pharma consensus EPS 3M change", entity: sector.pharma, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.sector.pharma}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.sector.auto.chg3m, name: "Auto consensus EPS 3M change", entity: sector.auto, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.sector.auto}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.sector.capgoods.chg3m, name: "Capital Goods consensus EPS 3M change", entity: sector.capgoods, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.sector.capgoods}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.sector.fmcg.chg3m, name: "FMCG consensus EPS 3M change", entity: sector.fmcg, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.sector.fmcg}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.sector.energy.chg3m, name: "Energy consensus EPS 3M change", entity: sector.energy, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.sector.energy}, params: {months: 3}, version: 1}}
+- {key: eps.fy1.sector.metals.chg3m, name: "Metals & Mining consensus EPS 3M change", entity: sector.metals, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: pct_change, inputs: {x: eps.fy1.sector.metals}, params: {months: 3}, version: 1}}
+- {key: flows.equity_active.3m, name: "Active equity funds net flows, 3M average", layer: window, value_type: num, unit: "INR cr", frequency: monthly,
+   derivation: {fn: rolling_mean, inputs: {x: flows.equity_active}, params: {periods: 3}, version: 1}}
+- {key: flows.equity_active.3m_pct_aum, name: "Active equity funds 3M average flows % of AUM", layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: ratio_of, inputs: {a: flows.equity_active.3m, b: aum.equity_active}, params: {scale: 100}, version: 1}}
+- {key: flows.duration.3m, name: "Duration funds net flows, 3M average", entity: l1.debt, layer: window, value_type: num, unit: "INR cr", frequency: monthly,
+   derivation: {fn: rolling_mean, inputs: {x: flows.duration}, params: {periods: 3}, version: 1}}
+- {key: flows.duration.3m_pct_aum, name: "Duration funds 3M average flows % of AUM", entity: l1.debt, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: ratio_of, inputs: {a: flows.duration.3m, b: aum.duration}, params: {scale: 100}, version: 1}}
+- {key: flows.gold_etf.3m, name: "Gold ETF net flows, 3M average", entity: metals.gold, layer: window, value_type: num, unit: "INR cr", frequency: monthly,
+   derivation: {fn: rolling_mean, inputs: {x: flows.gold_etf}, params: {periods: 3}, version: 1}}
+- {key: flows.gold_etf.3m_pct_aum, name: "Gold ETF 3M average flows % of AUM", entity: metals.gold, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: ratio_of, inputs: {a: flows.gold_etf.3m, b: aum.gold_etf}, params: {scale: 100}, version: 1}}
+- {key: flows.large.3m, name: "Large Cap funds net flows, 3M average", entity: equity.large, layer: window, value_type: num, unit: "INR cr", frequency: monthly,
+   derivation: {fn: rolling_mean, inputs: {x: flows.large}, params: {periods: 3}, version: 1}}
+- {key: flows.large.3m_pct_aum, name: "Large Cap funds 3M average flows % of AUM", entity: equity.large, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: ratio_of, inputs: {a: flows.large.3m, b: aum.large}, params: {scale: 100}, version: 1}}
+- {key: flows.mid.3m, name: "Mid Cap funds net flows, 3M average", entity: equity.mid, layer: window, value_type: num, unit: "INR cr", frequency: monthly,
+   derivation: {fn: rolling_mean, inputs: {x: flows.mid}, params: {periods: 3}, version: 1}}
+- {key: flows.mid.3m_pct_aum, name: "Mid Cap funds 3M average flows % of AUM", entity: equity.mid, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: ratio_of, inputs: {a: flows.mid.3m, b: aum.mid}, params: {scale: 100}, version: 1}}
+- {key: flows.small.3m, name: "Small Cap funds net flows, 3M average", entity: equity.small, layer: window, value_type: num, unit: "INR cr", frequency: monthly,
+   derivation: {fn: rolling_mean, inputs: {x: flows.small}, params: {periods: 3}, version: 1}}
+- {key: flows.small.3m_pct_aum, name: "Small Cap funds 3M average flows % of AUM", entity: equity.small, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: ratio_of, inputs: {a: flows.small.3m, b: aum.small}, params: {scale: 100}, version: 1}}
+- {key: flows.intl.3m, name: "International FoFs net flows, 3M average", entity: equity.intl, layer: window, value_type: num, unit: "INR cr", frequency: monthly,
+   derivation: {fn: rolling_mean, inputs: {x: flows.intl}, params: {periods: 3}, version: 1}}
+- {key: flows.intl.3m_pct_aum, name: "International FoFs 3M average flows % of AUM", entity: equity.intl, layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: ratio_of, inputs: {a: flows.intl.3m, b: aum.intl}, params: {scale: 100}, version: 1}}
+- {key: flows.sectoral.3m, name: "Sectoral/Thematic funds net flows, 3M average", layer: window, value_type: num, unit: "INR cr", frequency: monthly,
+   derivation: {fn: rolling_mean, inputs: {x: flows.sectoral}, params: {periods: 3}, version: 1}}
+- {key: flows.sectoral.3m_pct_aum, name: "Sectoral/Thematic funds 3M average flows % of AUM", layer: window, value_type: num, unit: "%", frequency: monthly,
+   derivation: {fn: ratio_of, inputs: {a: flows.sectoral.3m, b: aum.sectoral}, params: {scale: 100}, version: 1}}
+
+# ----------------------------------------------------------------------------
+# Percentiles (point-in-time; the Data Trackers %ile columns)
+# ----------------------------------------------------------------------------
+- {key: pctile.180m.spread.mid_large, name: "Mid–Large spread percentile (15Y)", entity: equity.mid, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
    derivation: {fn: percentile_rank, inputs: {x: spread.mid_large}, params: {window_months: 180}, version: 1}}
-- key: l1.equity::macro
-  name: Equity - Macro
-  entity: l1.equity
-  layer: score
-  value_type: num
-  unit: score
-  frequency: monthly
-  validation: {min: 0, max: 100}
-  derivation:
-    fn: rubric
-    inputs: {stance: judg.rbi.stance}
-    params: {base: 50, clamp: [0, 100], add: {stance: {cutting: 20, hold: 0, hiking: -20}}}
-    version: 1
-  registry: {display_name: Equity - Macro, node: l1.equity, signal: macro, group: equity, update_type: rubric, owner: Investment Team, stale_after: 40d}
-- {key: trig.currency_stress, name: Currency stress, layer: trigger, value_type: bool, frequency: event,
-   registry: {group: veto, update_type: analyst, owner: Investment Team}}
+- {key: pctile.180m.spread.small_large, name: "Small–Large spread percentile (15Y)", entity: equity.small, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: spread.small_large}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.gap.earnings_yield, name: "Earnings-yield gap percentile (15Y)", entity: l1.equity, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: gap.earnings_yield}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.pe.nifty50, name: "Nifty 50 P/E percentile (15Y)", entity: idx.nifty50, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: pe.nifty50}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.pe.nifty100, name: "Nifty 100 P/E percentile (15Y)", entity: equity.large, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: pe.nifty100}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.pe.midcap150, name: "Midcap 150 P/E percentile (15Y)", entity: equity.mid, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: pe.midcap150}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.pe.smallcap250, name: "Smallcap 250 P/E percentile (15Y)", entity: equity.small, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: pe.smallcap250}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.pe.sp500_fwd, name: "S&P 500 forward P/E percentile (15Y)", entity: equity.intl, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: pe.sp500_fwd}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.spread.us_india_fwdpe, name: "US − India forward P/E gap percentile (15Y)", entity: equity.intl, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: spread.us_india_fwdpe}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.breadth.nifty100, name: "Nifty100 revision breadth percentile (15Y)", entity: equity.large, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: breadth.nifty100}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.breadth.midcap150, name: "Midcap150 revision breadth percentile (15Y)", entity: equity.mid, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: breadth.midcap150}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.breadth.smallcap250, name: "Smallcap250 revision breadth percentile (15Y)", entity: equity.small, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: breadth.smallcap250}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.large.chg3m, name: "Large Cap EPS 3M change percentile (15Y)", entity: equity.large, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.large.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.mid.chg3m, name: "Mid Cap EPS 3M change percentile (15Y)", entity: equity.mid, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.mid.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.small.chg3m, name: "Small Cap EPS 3M change percentile (15Y)", entity: equity.small, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.small.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.margin.ebitda.large, name: "Large EBITDA margin percentile (15Y)", entity: equity.large, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: margin.ebitda.large}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.margin.ebitda.mid, name: "Mid EBITDA margin percentile (15Y)", entity: equity.mid, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: margin.ebitda.mid}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.margin.ebitda.small, name: "Small EBITDA margin percentile (15Y)", entity: equity.small, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: margin.ebitda.small}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.margin.ebitda.us, name: "Us EBITDA margin percentile (15Y)", entity: equity.intl, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: margin.ebitda.us}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.flows.equity_active.3m_pct_aum, name: "Active equity funds 3M flows % AUM percentile (15Y)", layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: flows.equity_active.3m_pct_aum}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.flows.duration.3m_pct_aum, name: "Duration funds 3M flows % AUM percentile (15Y)", entity: l1.debt, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: flows.duration.3m_pct_aum}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.flows.gold_etf.3m_pct_aum, name: "Gold ETF 3M flows % AUM percentile (15Y)", entity: metals.gold, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: flows.gold_etf.3m_pct_aum}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.flows.large.3m_pct_aum, name: "Large Cap funds 3M flows % AUM percentile (15Y)", entity: equity.large, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: flows.large.3m_pct_aum}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.flows.mid.3m_pct_aum, name: "Mid Cap funds 3M flows % AUM percentile (15Y)", entity: equity.mid, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: flows.mid.3m_pct_aum}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.flows.small.3m_pct_aum, name: "Small Cap funds 3M flows % AUM percentile (15Y)", entity: equity.small, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: flows.small.3m_pct_aum}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.flows.intl.3m_pct_aum, name: "International FoFs 3M flows % AUM percentile (15Y)", entity: equity.intl, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: flows.intl.3m_pct_aum}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.flows.sectoral.3m_pct_aum, name: "Sectoral/Thematic funds 3M flows % AUM percentile (15Y)", layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: flows.sectoral.3m_pct_aum}, params: {window_months: 180}, version: 1}}
+- {key: pctile.240m.gold.real, name: "Real gold price percentile (20Y)", entity: metals.gold, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: gold.real}, params: {window_months: 240}, version: 1}}
+- {key: pctile.240m.ratio.gold_silver, name: "Gold/silver ratio percentile (20Y)", layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: ratio.gold_silver}, params: {window_months: 240}, version: 1}}
+- {key: pctile.180m.ytm.short, name: "ytm.short percentile (15Y)", entity: debt.liquid, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: ytm.short}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.ytm.corporate, name: "ytm.corporate percentile (15Y)", entity: debt.corporate, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: ytm.corporate}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.ytm.gilt, name: "ytm.gilt percentile (15Y)", entity: debt.gilt, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: ytm.gilt}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.yield.tbill1y, name: "yield.tbill1y percentile (15Y)", entity: debt.liquid, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: yield.tbill1y}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.yield.aaa3y, name: "yield.aaa3y percentile (15Y)", entity: debt.corporate, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: yield.aaa3y}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.yield.gsec10y, name: "yield.gsec10y percentile (15Y)", entity: debt.gilt, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: yield.gsec10y}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.val.sector.banking, name: "Banking valuation percentile (15Y)", entity: sector.banking, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: val.sector.banking}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.sector.banking.chg3m, name: "Banking EPS 3M change percentile (15Y)", entity: sector.banking, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.sector.banking.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.val.sector.it, name: "IT Services valuation percentile (15Y)", entity: sector.it, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: val.sector.it}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.sector.it.chg3m, name: "IT Services EPS 3M change percentile (15Y)", entity: sector.it, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.sector.it.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.val.sector.pharma, name: "Pharma valuation percentile (15Y)", entity: sector.pharma, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: val.sector.pharma}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.sector.pharma.chg3m, name: "Pharma EPS 3M change percentile (15Y)", entity: sector.pharma, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.sector.pharma.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.val.sector.auto, name: "Auto valuation percentile (15Y)", entity: sector.auto, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: val.sector.auto}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.sector.auto.chg3m, name: "Auto EPS 3M change percentile (15Y)", entity: sector.auto, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.sector.auto.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.val.sector.capgoods, name: "Capital Goods valuation percentile (15Y)", entity: sector.capgoods, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: val.sector.capgoods}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.sector.capgoods.chg3m, name: "Capital Goods EPS 3M change percentile (15Y)", entity: sector.capgoods, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.sector.capgoods.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.val.sector.fmcg, name: "FMCG valuation percentile (15Y)", entity: sector.fmcg, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: val.sector.fmcg}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.sector.fmcg.chg3m, name: "FMCG EPS 3M change percentile (15Y)", entity: sector.fmcg, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.sector.fmcg.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.val.sector.energy, name: "Energy valuation percentile (15Y)", entity: sector.energy, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: val.sector.energy}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.sector.energy.chg3m, name: "Energy EPS 3M change percentile (15Y)", entity: sector.energy, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.sector.energy.chg3m}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.val.sector.metals, name: "Metals & Mining valuation percentile (15Y)", entity: sector.metals, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: val.sector.metals}, params: {window_months: 180}, version: 1}}
+- {key: pctile.180m.eps.fy1.sector.metals.chg3m, name: "Metals & Mining EPS 3M change percentile (15Y)", entity: sector.metals, layer: percentile, value_type: num, unit: pctile, frequency: monthly, min_history: 24, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.sector.metals.chg3m}, params: {window_months: 180}, version: 1}}
+
+# ----------------------------------------------------------------------------
+# Scores — Level 1 asset classes (15)
+# Calculation Guide rows 7–25.
+# ----------------------------------------------------------------------------
+- {key: l1.equity::valuation, name: "Equity - Valuation", entity: l1.equity, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {gap: pctile.180m.gap.earnings_yield, pe: pctile.180m.pe.nifty50}, params: {expr: "(gap + (100 - pe)) / 2"}, version: 1},
+   registry: {display_name: "Equity - Valuation", node: l1.equity, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.equity::macro, name: "Equity - Macro", entity: l1.equity, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {stance: judg.rbi.stance, growth: judg.growth_vs_exp, infl: judg.inflation_trend}, params: {base: 50, clamp: [0, 100], add: {stance: {cutting: 20, hold: 0, hiking: -20}, growth: {beat: 10, in_line: 0, miss: -10}, infl: {falling: 5, stable: 0, rising: -5}}}, version: 1},
+   registry: {display_name: "Equity - Macro", node: l1.equity, signal: macro, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.equity::fundamentals, name: "Equity - Fundamentals", entity: l1.equity, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: fallback, inputs: {breadth: pctile.180m.breadth.nifty100, eps: pctile.180m.eps.fy1.large.chg3m}, params: {order: [breadth, eps]}, version: 1},
+   registry: {display_name: "Equity - Fundamentals", node: l1.equity, signal: fundamentals, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.equity::flows, name: "Equity - Flows", entity: l1.equity, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.flows.equity_active.3m_pct_aum}, version: 1},
+   registry: {display_name: "Equity - Flows", node: l1.equity, signal: flows, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.equity::momentum, name: "Equity - Momentum", entity: l1.equity, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: excess.nifty50tr.12m}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Equity - Momentum", node: l1.equity, signal: momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.debt::valuation, name: "Debt - Valuation", entity: l1.debt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: yield.real10y}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Debt - Valuation", node: l1.debt, signal: valuation, group: debt, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.debt::macro, name: "Debt - Macro", entity: l1.debt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {path: judg.rbi_path, supply: judg.fiscal_supply, infl: judg.inflation_vs_target}, params: {base: 50, clamp: [0, 100], add: {path: {cuts_gt50: 20, cuts_25_50: 20, hold: 0, hikes_25_50: -15, hikes_gt50: -15}, supply: {normal: 0, heavy: -10}, infl: {below: 10, at_or_above: 0}}}, version: 1},
+   registry: {display_name: "Debt - Macro", node: l1.debt, signal: macro, group: debt, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.debt::fundamentals, name: "Debt - Fundamentals", entity: l1.debt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {credit: judg.credit_cycle, liquidity: judg.system_liquidity}, params: {base: 50, clamp: [0, 100], add: {credit: {quiet: 10, normal: 0, stress: -25}, liquidity: {surplus: 10, neutral: 0, deficit: -10}}}, version: 1},
+   registry: {display_name: "Debt - Fundamentals", node: l1.debt, signal: fundamentals, group: debt, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.debt::flows, name: "Debt - Flows", entity: l1.debt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.flows.duration.3m_pct_aum}, version: 1},
+   registry: {display_name: "Debt - Flows", node: l1.debt, signal: flows, group: debt, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.debt::momentum, name: "Debt - Momentum", entity: l1.debt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: bondidx.ret12m}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Debt - Momentum", node: l1.debt, signal: momentum, group: debt, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.metals::valuation, name: "Metals - Valuation", entity: l1.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.240m.gold.real}, version: 1},
+   registry: {display_name: "Metals - Valuation", node: l1.metals, signal: valuation, group: metals, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.metals::macro, name: "Metals - Macro", entity: l1.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: tips.10y.chg6m_bp}, params: {ranges: [{max: -50, score: 75}, {min: -50, max: -10, score: 60}, {min: -10, max: 10, score: 50}, {min: 10, max: 50, score: 40}, {min: 50, score: 25}]}, version: 1},
+   registry: {display_name: "Metals - Macro", node: l1.metals, signal: macro, group: metals, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.metals::fundamentals, name: "Metals - Fundamentals", entity: l1.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cb: judg.cb_gold_buying, etf: judg.gold_etf_holdings}, params: {base: 50, clamp: [0, 100], add: {cb: {above_avg: 15, in_line: 0, below_avg: -10}, etf: {rising: 10, flat: 0, falling: -10}}}, version: 1},
+   registry: {display_name: "Metals - Fundamentals", node: l1.metals, signal: fundamentals, group: metals, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.metals::flows, name: "Metals - Flows", entity: l1.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.flows.gold_etf.3m_pct_aum}, version: 1},
+   registry: {display_name: "Metals - Flows", node: l1.metals, signal: flows, group: metals, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: l1.metals::momentum, name: "Metals - Momentum", entity: l1.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: ret.gold.12m}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Metals - Momentum", node: l1.metals, signal: momentum, group: metals, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+
+# ----------------------------------------------------------------------------
+# Scores — equity segments (20)
+# Calculation Guide rows 28–32.
+# ----------------------------------------------------------------------------
+- {key: equity.large::valuation, name: "Large Cap - Valuation", entity: equity.large, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.pe.nifty100}, version: 1},
+   registry: {display_name: "Large Cap - Valuation", node: equity.large, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.mid::valuation, name: "Mid Cap - Valuation", entity: equity.mid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.pe.midcap150}, version: 1},
+   registry: {display_name: "Mid Cap - Valuation", node: equity.mid, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.small::valuation, name: "Small Cap - Valuation", entity: equity.small, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.pe.smallcap250}, version: 1},
+   registry: {display_name: "Small Cap - Valuation", node: equity.small, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.intl::valuation, name: "International - Valuation", entity: equity.intl, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {pe: pctile.180m.pe.sp500_fwd, gap: pctile.180m.spread.us_india_fwdpe}, params: {expr: "max(0, min(100, 100 - pe - (gap >= 90 ? 5 : 0) + (gap <= 10 ? 5 : 0)))"}, version: 1},
+   registry: {display_name: "International - Valuation", node: equity.intl, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.large::relvalue, name: "Large Cap - Relative value", entity: equity.large, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: avg, inputs: {mid: pctile.180m.spread.mid_large, small: pctile.180m.spread.small_large}, version: 1},
+   registry: {display_name: "Large Cap - Relative value", node: equity.large, signal: relvalue, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.mid::relvalue, name: "Mid Cap - Relative value", entity: equity.mid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.spread.mid_large}, version: 1},
+   registry: {display_name: "Mid Cap - Relative value", node: equity.mid, signal: relvalue, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.small::relvalue, name: "Small Cap - Relative value", entity: equity.small, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.spread.small_large}, version: 1},
+   registry: {display_name: "Small Cap - Relative value", node: equity.small, signal: relvalue, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.intl::relvalue, name: "International - Relative value", entity: equity.intl, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.spread.us_india_fwdpe}, version: 1},
+   registry: {display_name: "International - Relative value", node: equity.intl, signal: relvalue, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.large::revisions, name: "Large Cap - Revisions", entity: equity.large, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: fallback, inputs: {breadth: pctile.180m.breadth.nifty100, eps: pctile.180m.eps.fy1.large.chg3m}, params: {order: [breadth, eps]}, version: 1},
+   registry: {display_name: "Large Cap - Revisions", node: equity.large, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.mid::revisions, name: "Mid Cap - Revisions", entity: equity.mid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: fallback, inputs: {breadth: pctile.180m.breadth.midcap150, eps: pctile.180m.eps.fy1.mid.chg3m}, params: {order: [breadth, eps]}, version: 1},
+   registry: {display_name: "Mid Cap - Revisions", node: equity.mid, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.small::revisions, name: "Small Cap - Revisions", entity: equity.small, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: fallback, inputs: {breadth: pctile.180m.breadth.smallcap250, eps: pctile.180m.eps.fy1.small.chg3m}, params: {order: [breadth, eps]}, version: 1},
+   registry: {display_name: "Small Cap - Revisions", node: equity.small, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.intl::revisions, name: "International - Revisions", entity: equity.intl, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: eps.fy1.intl.chg3m}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "International - Revisions", node: equity.intl, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.large::eps_growth_diff, name: "Large Cap - EPS growth differential", entity: equity.large, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: const, inputs: {on: yield.gsec10y}, params: {value: 50}, version: 1},
+   registry: {display_name: "Large Cap - EPS growth differential", node: equity.large, signal: eps_growth_diff, group: equity, update_type: constant, owner: "Investment Team", stale_after: "40d", flags: [constant]}}
+- {key: equity.mid::eps_growth_diff, name: "Mid Cap - EPS growth differential", entity: equity.mid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: epsg.gap.mid}, params: {ranges: [{min: 8, score: 75}, {min: 3, max: 8, score: 60}, {min: -3, max: 3, score: 50}, {min: -8, max: -3, score: 40}, {max: -8, score: 25}]}, version: 1},
+   registry: {display_name: "Mid Cap - EPS growth differential", node: equity.mid, signal: eps_growth_diff, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.small::eps_growth_diff, name: "Small Cap - EPS growth differential", entity: equity.small, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: epsg.gap.small}, params: {ranges: [{min: 8, score: 75}, {min: 3, max: 8, score: 60}, {min: -3, max: 3, score: 50}, {min: -8, max: -3, score: 40}, {max: -8, score: 25}]}, version: 1},
+   registry: {display_name: "Small Cap - EPS growth differential", node: equity.small, signal: eps_growth_diff, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.intl::eps_growth_diff, name: "International - EPS growth differential", entity: equity.intl, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: epsg.gap.intl}, params: {ranges: [{min: 8, score: 80}, {min: 3, max: 8, score: 65}, {min: -3, max: 3, score: 55}, {min: -8, max: -3, score: 45}, {max: -8, score: 30}]}, version: 1},
+   registry: {display_name: "International - EPS growth differential", node: equity.intl, signal: eps_growth_diff, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.large::margin_cycle, name: "Large Cap - Margin / cycle", entity: equity.large, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.margin.ebitda.large}, version: 1},
+   registry: {display_name: "Large Cap - Margin / cycle", node: equity.large, signal: margin_cycle, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.mid::margin_cycle, name: "Mid Cap - Margin / cycle", entity: equity.mid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {margin: pctile.180m.margin.ebitda.mid, cycle: cycle.domestic}, params: {expr: "((100 - margin) + cycle) / 2"}, version: 1},
+   registry: {display_name: "Mid Cap - Margin / cycle", node: equity.mid, signal: margin_cycle, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.small::margin_cycle, name: "Small Cap - Margin / cycle", entity: equity.small, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {margin: pctile.180m.margin.ebitda.small, cycle: cycle.domestic}, params: {expr: "((100 - margin) + cycle) / 2"}, version: 1},
+   registry: {display_name: "Small Cap - Margin / cycle", node: equity.small, signal: margin_cycle, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: equity.intl::margin_cycle, name: "International - Margin / cycle", entity: equity.intl, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.margin.ebitda.us}, version: 1},
+   registry: {display_name: "International - Margin / cycle", node: equity.intl, signal: margin_cycle, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+
+# ----------------------------------------------------------------------------
+# Scores — debt buckets (12)
+# Calculation Guide rows 35–38. Carry falls back to the rates-log
+# proxies until each category YTM has 24 months of history.
+# ----------------------------------------------------------------------------
+- {key: debt.liquid::carry, name: "Liquid - Carry", entity: debt.liquid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: fallback, inputs: {ytm: pctile.180m.ytm.short, proxy: pctile.180m.yield.tbill1y}, params: {order: [ytm, proxy]}, version: 1},
+   registry: {display_name: "Liquid - Carry", node: debt.liquid, signal: carry, group: debt, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: debt.corporate::carry, name: "Corporate - Carry", entity: debt.corporate, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: fallback, inputs: {ytm: pctile.180m.ytm.corporate, proxy: pctile.180m.yield.aaa3y}, params: {order: [ytm, proxy]}, version: 1},
+   registry: {display_name: "Corporate - Carry", node: debt.corporate, signal: carry, group: debt, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: debt.gilt::carry, name: "Gilt - Carry", entity: debt.gilt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: fallback, inputs: {ytm: pctile.180m.ytm.gilt, proxy: pctile.180m.yield.gsec10y}, params: {order: [ytm, proxy]}, version: 1},
+   registry: {display_name: "Gilt - Carry", node: debt.gilt, signal: carry, group: debt, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: debt.liquid::rate_cycle, name: "Liquid - Rate-cycle duration benefit", entity: debt.liquid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: judg.rbi_path}, params: {categories: {cuts_gt50: 30, cuts_25_50: 40, hold: 55, hikes_25_50: 70, hikes_gt50: 80}}, version: 1},
+   registry: {display_name: "Liquid - Rate-cycle duration benefit", node: debt.liquid, signal: rate_cycle, group: debt, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: debt.corporate::rate_cycle, name: "Corporate - Rate-cycle duration benefit", entity: debt.corporate, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: judg.rbi_path}, params: {categories: {cuts_gt50: 60, cuts_25_50: 58, hold: 50, hikes_25_50: 40, hikes_gt50: 35}}, version: 1},
+   registry: {display_name: "Corporate - Rate-cycle duration benefit", node: debt.corporate, signal: rate_cycle, group: debt, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: debt.gilt::rate_cycle, name: "Gilt - Rate-cycle duration benefit", entity: debt.gilt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: judg.rbi_path}, params: {categories: {cuts_gt50: 80, cuts_25_50: 70, hold: 50, hikes_25_50: 30, hikes_gt50: 20}}, version: 1},
+   registry: {display_name: "Gilt - Rate-cycle duration benefit", node: debt.gilt, signal: rate_cycle, group: debt, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: debt.liquid::credit_spread, name: "Liquid - Credit spread cushion", entity: debt.liquid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: const, inputs: {on: yield.gsec10y}, params: {value: 50}, version: 1},
+   registry: {display_name: "Liquid - Credit spread cushion", node: debt.liquid, signal: credit_spread, group: debt, update_type: constant, owner: "Investment Team", stale_after: "40d", flags: [constant]}}
+- {key: debt.corporate::credit_spread, name: "Corporate - Credit spread cushion", entity: debt.corporate, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: spread.aaa_bps}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Corporate - Credit spread cushion", node: debt.corporate, signal: credit_spread, group: debt, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: debt.gilt::credit_spread, name: "Gilt - Credit spread cushion", entity: debt.gilt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: const, inputs: {on: yield.gsec10y}, params: {value: 50}, version: 1},
+   registry: {display_name: "Gilt - Credit spread cushion", node: debt.gilt, signal: credit_spread, group: debt, update_type: constant, owner: "Investment Team", stale_after: "40d", flags: [constant]}}
+- {key: debt.liquid::liquidity, name: "Liquid - Liquidity / redemption safety", entity: debt.liquid, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: const, inputs: {on: yield.gsec10y}, params: {value: 90}, version: 1},
+   registry: {display_name: "Liquid - Liquidity / redemption safety", node: debt.liquid, signal: liquidity, group: debt, update_type: constant, owner: "Investment Team", stale_after: "40d", flags: [constant]}}
+- {key: debt.corporate::liquidity, name: "Corporate - Liquidity / redemption safety", entity: debt.corporate, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: judg.credit_fund_stress}, params: {categories: {none: 65, stress: 40}}, version: 1},
+   registry: {display_name: "Corporate - Liquidity / redemption safety", node: debt.corporate, signal: liquidity, group: debt, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: debt.gilt::liquidity, name: "Gilt - Liquidity / redemption safety", entity: debt.gilt, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: const, inputs: {on: yield.gsec10y}, params: {value: 75}, version: 1},
+   registry: {display_name: "Gilt - Liquidity / redemption safety", node: debt.gilt, signal: liquidity, group: debt, update_type: constant, owner: "Investment Team", stale_after: "40d", flags: [constant]}}
+
+# ----------------------------------------------------------------------------
+# Scores — precious metals split (6)
+# Calculation Guide rows 41–43.
+# ----------------------------------------------------------------------------
+- {key: metals.gold::ratio, name: "Gold - Gold/silver ratio", entity: metals.gold, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.240m.ratio.gold_silver}, version: 1},
+   registry: {display_name: "Gold - Gold/silver ratio", node: metals.gold, signal: ratio, group: metals, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: metals.silver::ratio, name: "Silver - Gold/silver ratio", entity: metals.silver, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: avg, inputs: {x: pctile.240m.ratio.gold_silver}, version: 1},
+   registry: {display_name: "Silver - Gold/silver ratio", node: metals.silver, signal: ratio, group: metals, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: metals.gold::real_rates, name: "Gold - Real-rates trend", entity: metals.gold, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: tips.10y.chg6m_bp}, params: {ranges: [{max: -50, score: 75}, {min: -50, max: -10, score: 60}, {min: -10, max: 10, score: 50}, {min: 10, max: 50, score: 40}, {min: 50, score: 40}]}, version: 1},
+   registry: {display_name: "Gold - Real-rates trend", node: metals.gold, signal: real_rates, group: metals, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: metals.silver::real_rates, name: "Silver - Real-rates trend", entity: metals.silver, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: bucket_map, inputs: {x: tips.10y.chg6m_bp}, params: {ranges: [{max: -50, score: 65}, {min: -50, max: -10, score: 57}, {min: -10, max: 10, score: 50}, {min: 10, max: 50, score: 45}, {min: 50, score: 45}]}, version: 1},
+   registry: {display_name: "Silver - Real-rates trend", node: metals.silver, signal: real_rates, group: metals, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: metals.gold::industrial, name: "Gold - Industrial demand", entity: metals.gold, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: const, inputs: {on: yield.gsec10y}, params: {value: 50}, version: 1},
+   registry: {display_name: "Gold - Industrial demand", node: metals.gold, signal: industrial, group: metals, update_type: constant, owner: "Investment Team", stale_after: "40d", flags: [constant]}}
+- {key: metals.silver::industrial, name: "Silver - Industrial demand", entity: metals.silver, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {pmi: pmi.global, chg: pmi.global.chg1m, adj: adj.solar_ev}, params: {expr: "min(100, (pmi > 52 && chg > 0 ? 70 : (pmi >= 50 ? 55 : 35)) + adj)"}, version: 1},
+   registry: {display_name: "Silver - Industrial demand", node: metals.silver, signal: industrial, group: metals, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+
+# ----------------------------------------------------------------------------
+# Scores — sector satellite (32)
+# Calculation Guide rows 46–49.
+# ----------------------------------------------------------------------------
+- {key: sector.banking::valuation, name: "Banking - Valuation", entity: sector.banking, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.val.sector.banking}, version: 1},
+   registry: {display_name: "Banking - Valuation", node: sector.banking, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.banking::revisions, name: "Banking - Revisions", entity: sector.banking, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {eps: pctile.180m.eps.fy1.sector.banking.chg3m, adj: adj.results.sector.banking}, params: {expr: "max(0, min(100, eps + adj))"}, version: 1},
+   registry: {display_name: "Banking - Revisions", node: sector.banking, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.banking::rel_momentum, name: "Banking - Relative momentum", entity: sector.banking, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: relmom.sector.banking}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Banking - Relative momentum", node: sector.banking, signal: rel_momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.banking::cycle, name: "Banking - Cycle position", entity: sector.banking, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cycle: judg.sector_cycle.banking, overhang: judg.sector_overhang.banking}, params: {base: 50, clamp: [0, 100], add: {cycle: {turning_up: 15, mid: 0, late: -15}, overhang: {none: 0, overhang: -10}}}, version: 1},
+   registry: {display_name: "Banking - Cycle position", node: sector.banking, signal: cycle, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.it::valuation, name: "IT Services - Valuation", entity: sector.it, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.val.sector.it}, version: 1},
+   registry: {display_name: "IT Services - Valuation", node: sector.it, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.it::revisions, name: "IT Services - Revisions", entity: sector.it, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {eps: pctile.180m.eps.fy1.sector.it.chg3m, adj: adj.results.sector.it}, params: {expr: "max(0, min(100, eps + adj))"}, version: 1},
+   registry: {display_name: "IT Services - Revisions", node: sector.it, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.it::rel_momentum, name: "IT Services - Relative momentum", entity: sector.it, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: relmom.sector.it}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "IT Services - Relative momentum", node: sector.it, signal: rel_momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.it::cycle, name: "IT Services - Cycle position", entity: sector.it, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cycle: judg.sector_cycle.it, overhang: judg.sector_overhang.it}, params: {base: 50, clamp: [0, 100], add: {cycle: {turning_up: 15, mid: 0, late: -15}, overhang: {none: 0, overhang: -10}}}, version: 1},
+   registry: {display_name: "IT Services - Cycle position", node: sector.it, signal: cycle, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.pharma::valuation, name: "Pharma - Valuation", entity: sector.pharma, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.val.sector.pharma}, version: 1},
+   registry: {display_name: "Pharma - Valuation", node: sector.pharma, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.pharma::revisions, name: "Pharma - Revisions", entity: sector.pharma, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {eps: pctile.180m.eps.fy1.sector.pharma.chg3m, adj: adj.results.sector.pharma}, params: {expr: "max(0, min(100, eps + adj))"}, version: 1},
+   registry: {display_name: "Pharma - Revisions", node: sector.pharma, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.pharma::rel_momentum, name: "Pharma - Relative momentum", entity: sector.pharma, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: relmom.sector.pharma}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Pharma - Relative momentum", node: sector.pharma, signal: rel_momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.pharma::cycle, name: "Pharma - Cycle position", entity: sector.pharma, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cycle: judg.sector_cycle.pharma, overhang: judg.sector_overhang.pharma}, params: {base: 50, clamp: [0, 100], add: {cycle: {turning_up: 15, mid: 0, late: -15}, overhang: {none: 0, overhang: -10}}}, version: 1},
+   registry: {display_name: "Pharma - Cycle position", node: sector.pharma, signal: cycle, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.auto::valuation, name: "Auto - Valuation", entity: sector.auto, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.val.sector.auto}, version: 1},
+   registry: {display_name: "Auto - Valuation", node: sector.auto, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.auto::revisions, name: "Auto - Revisions", entity: sector.auto, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {eps: pctile.180m.eps.fy1.sector.auto.chg3m, adj: adj.results.sector.auto}, params: {expr: "max(0, min(100, eps + adj))"}, version: 1},
+   registry: {display_name: "Auto - Revisions", node: sector.auto, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.auto::rel_momentum, name: "Auto - Relative momentum", entity: sector.auto, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: relmom.sector.auto}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Auto - Relative momentum", node: sector.auto, signal: rel_momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.auto::cycle, name: "Auto - Cycle position", entity: sector.auto, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cycle: judg.sector_cycle.auto, overhang: judg.sector_overhang.auto}, params: {base: 50, clamp: [0, 100], add: {cycle: {turning_up: 15, mid: 0, late: -15}, overhang: {none: 0, overhang: -10}}}, version: 1},
+   registry: {display_name: "Auto - Cycle position", node: sector.auto, signal: cycle, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.capgoods::valuation, name: "Capital Goods - Valuation", entity: sector.capgoods, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.val.sector.capgoods}, version: 1},
+   registry: {display_name: "Capital Goods - Valuation", node: sector.capgoods, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.capgoods::revisions, name: "Capital Goods - Revisions", entity: sector.capgoods, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {eps: pctile.180m.eps.fy1.sector.capgoods.chg3m, adj: adj.results.sector.capgoods}, params: {expr: "max(0, min(100, eps + adj))"}, version: 1},
+   registry: {display_name: "Capital Goods - Revisions", node: sector.capgoods, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.capgoods::rel_momentum, name: "Capital Goods - Relative momentum", entity: sector.capgoods, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: relmom.sector.capgoods}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Capital Goods - Relative momentum", node: sector.capgoods, signal: rel_momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.capgoods::cycle, name: "Capital Goods - Cycle position", entity: sector.capgoods, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cycle: judg.sector_cycle.capgoods, overhang: judg.sector_overhang.capgoods}, params: {base: 50, clamp: [0, 100], add: {cycle: {turning_up: 15, mid: 0, late: -15}, overhang: {none: 0, overhang: -10}}}, version: 1},
+   registry: {display_name: "Capital Goods - Cycle position", node: sector.capgoods, signal: cycle, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.fmcg::valuation, name: "FMCG - Valuation", entity: sector.fmcg, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.val.sector.fmcg}, version: 1},
+   registry: {display_name: "FMCG - Valuation", node: sector.fmcg, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.fmcg::revisions, name: "FMCG - Revisions", entity: sector.fmcg, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {eps: pctile.180m.eps.fy1.sector.fmcg.chg3m, adj: adj.results.sector.fmcg}, params: {expr: "max(0, min(100, eps + adj))"}, version: 1},
+   registry: {display_name: "FMCG - Revisions", node: sector.fmcg, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.fmcg::rel_momentum, name: "FMCG - Relative momentum", entity: sector.fmcg, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: relmom.sector.fmcg}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "FMCG - Relative momentum", node: sector.fmcg, signal: rel_momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.fmcg::cycle, name: "FMCG - Cycle position", entity: sector.fmcg, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cycle: judg.sector_cycle.fmcg, overhang: judg.sector_overhang.fmcg}, params: {base: 50, clamp: [0, 100], add: {cycle: {turning_up: 15, mid: 0, late: -15}, overhang: {none: 0, overhang: -10}}}, version: 1},
+   registry: {display_name: "FMCG - Cycle position", node: sector.fmcg, signal: cycle, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.energy::valuation, name: "Energy - Valuation", entity: sector.energy, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.val.sector.energy}, version: 1},
+   registry: {display_name: "Energy - Valuation", node: sector.energy, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.energy::revisions, name: "Energy - Revisions", entity: sector.energy, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {eps: pctile.180m.eps.fy1.sector.energy.chg3m, adj: adj.results.sector.energy}, params: {expr: "max(0, min(100, eps + adj))"}, version: 1},
+   registry: {display_name: "Energy - Revisions", node: sector.energy, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.energy::rel_momentum, name: "Energy - Relative momentum", entity: sector.energy, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: relmom.sector.energy}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Energy - Relative momentum", node: sector.energy, signal: rel_momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.energy::cycle, name: "Energy - Cycle position", entity: sector.energy, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cycle: judg.sector_cycle.energy, overhang: judg.sector_overhang.energy}, params: {base: 50, clamp: [0, 100], add: {cycle: {turning_up: 15, mid: 0, late: -15}, overhang: {none: 0, overhang: -10}}}, version: 1},
+   registry: {display_name: "Energy - Cycle position", node: sector.energy, signal: cycle, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.metals::valuation, name: "Metals & Mining - Valuation", entity: sector.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: invert, inputs: {x: pctile.180m.val.sector.metals}, version: 1},
+   registry: {display_name: "Metals & Mining - Valuation", node: sector.metals, signal: valuation, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.metals::revisions, name: "Metals & Mining - Revisions", entity: sector.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: expr, inputs: {eps: pctile.180m.eps.fy1.sector.metals.chg3m, adj: adj.results.sector.metals}, params: {expr: "max(0, min(100, eps + adj))"}, version: 1},
+   registry: {display_name: "Metals & Mining - Revisions", node: sector.metals, signal: revisions, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.metals::rel_momentum, name: "Metals & Mining - Relative momentum", entity: sector.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: percentile_rank, inputs: {x: relmom.sector.metals}, params: {window_months: 180}, version: 1},
+   registry: {display_name: "Metals & Mining - Relative momentum", node: sector.metals, signal: rel_momentum, group: equity, update_type: derived, owner: "Investment Team", stale_after: "40d"}}
+- {key: sector.metals::cycle, name: "Metals & Mining - Cycle position", entity: sector.metals, layer: score, value_type: num, unit: score, frequency: monthly, validation: {min: 0, max: 100},
+   derivation: {fn: rubric, inputs: {cycle: judg.sector_cycle.metals, overhang: judg.sector_overhang.metals}, params: {base: 50, clamp: [0, 100], add: {cycle: {turning_up: 15, mid: 0, late: -15}, overhang: {none: 0, overhang: -10}}}, version: 1},
+   registry: {display_name: "Metals & Mining - Cycle position", node: sector.metals, signal: cycle, group: equity, update_type: rubric, owner: "Investment Team", stale_after: "40d"}}
+
+# ----------------------------------------------------------------------------
+# Triggers (veto gates, Weights & Rules rows 56–61)
+# Computed: flow froth (top decile 3+ months), parabolic (>40% in 6M),
+# EPS collapse (consensus cut >15% over 3M). Analyst: currency stress,
+# credit event, AMC inflow restrictions.
+# ----------------------------------------------------------------------------
+- {key: trig.flow_froth.equity, name: "Flow froth — equity", entity: l1.equity, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: consecutive, inputs: {x: pctile.180m.flows.equity_active.3m_pct_aum}, params: {op: ">=", value: 90, periods: 3}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.flow_froth.equity.large, name: "Flow froth — Large Cap", entity: equity.large, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: consecutive, inputs: {x: pctile.180m.flows.large.3m_pct_aum}, params: {op: ">=", value: 90, periods: 3}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.flow_froth.equity.mid, name: "Flow froth — Mid Cap", entity: equity.mid, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: consecutive, inputs: {x: pctile.180m.flows.mid.3m_pct_aum}, params: {op: ">=", value: 90, periods: 3}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.flow_froth.equity.small, name: "Flow froth — Small Cap", entity: equity.small, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: consecutive, inputs: {x: pctile.180m.flows.small.3m_pct_aum}, params: {op: ">=", value: 90, periods: 3}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.flow_froth.equity.intl, name: "Flow froth — International", entity: equity.intl, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: consecutive, inputs: {x: pctile.180m.flows.intl.3m_pct_aum}, params: {op: ">=", value: 90, periods: 3}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.flow_froth.sectoral, name: "Flow froth — sectoral/thematic funds", layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: consecutive, inputs: {x: pctile.180m.flows.sectoral.3m_pct_aum}, params: {op: ">=", value: 90, periods: 3}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.flow_froth.metals.gold, name: "Flow froth — gold ETF", entity: metals.gold, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: consecutive, inputs: {x: pctile.180m.flows.gold_etf.3m_pct_aum}, params: {op: ">=", value: 90, periods: 3}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.parabolic.gold, name: "Parabolic move — gold", entity: metals.gold, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: ret.gold.6m}, params: {op: ">", value: 40}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.parabolic.silver, name: "Parabolic move — silver", entity: metals.silver, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: ret.silver.6m}, params: {op: ">", value: 40}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.equity.large, name: "Earnings collapse — Large Cap", entity: equity.large, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.large.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.equity.mid, name: "Earnings collapse — Mid Cap", entity: equity.mid, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.mid.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.equity.small, name: "Earnings collapse — Small Cap", entity: equity.small, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.small.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.equity.intl, name: "Earnings collapse — International", entity: equity.intl, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.intl.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.sector.banking, name: "Earnings collapse — Banking", entity: sector.banking, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.sector.banking.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.sector.it, name: "Earnings collapse — IT Services", entity: sector.it, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.sector.it.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.sector.pharma, name: "Earnings collapse — Pharma", entity: sector.pharma, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.sector.pharma.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.sector.auto, name: "Earnings collapse — Auto", entity: sector.auto, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.sector.auto.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.sector.capgoods, name: "Earnings collapse — Capital Goods", entity: sector.capgoods, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.sector.capgoods.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.sector.fmcg, name: "Earnings collapse — FMCG", entity: sector.fmcg, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.sector.fmcg.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.sector.energy, name: "Earnings collapse — Energy", entity: sector.energy, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.sector.energy.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.eps_collapse.sector.metals, name: "Earnings collapse — Metals & Mining", entity: sector.metals, layer: trigger, value_type: bool, frequency: monthly,
+   derivation: {fn: threshold, inputs: {x: eps.fy1.sector.metals.chg3m}, params: {op: "<", value: -15}, version: 1},
+   registry: {group: veto, update_type: derived, owner: "Investment Team"}}
+- {key: trig.currency_stress, name: "Currency stress (sharp INR episode)", entity: equity.intl, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.credit_event, name: "Credit event (default/downgrade cycle)", entity: debt.corporate, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.equity.large, name: "AMC inflow restrictions — Large Cap", entity: equity.large, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.equity.mid, name: "AMC inflow restrictions — Mid Cap", entity: equity.mid, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.equity.small, name: "AMC inflow restrictions — Small Cap", entity: equity.small, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.equity.intl, name: "AMC inflow restrictions — International", entity: equity.intl, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.sector.banking, name: "AMC inflow restrictions — Banking", entity: sector.banking, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.sector.it, name: "AMC inflow restrictions — IT Services", entity: sector.it, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.sector.pharma, name: "AMC inflow restrictions — Pharma", entity: sector.pharma, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.sector.auto, name: "AMC inflow restrictions — Auto", entity: sector.auto, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.sector.capgoods, name: "AMC inflow restrictions — Capital Goods", entity: sector.capgoods, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.sector.fmcg, name: "AMC inflow restrictions — FMCG", entity: sector.fmcg, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.sector.energy, name: "AMC inflow restrictions — Energy", entity: sector.energy, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}
+- {key: trig.amc_restrictions.sector.metals, name: "AMC inflow restrictions — Metals & Mining", entity: sector.metals, layer: trigger, value_type: bool, frequency: event, registry: {group: veto, update_type: analyst, owner: "Investment Team"}}

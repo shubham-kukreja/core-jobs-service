@@ -1,0 +1,16 @@
+# Data Trackers – equity valuation log (niftyindices.com). The spread and
+# %ile columns are workbook formulas; the system recomputes them point-in-time.
+# known_at: NSE publishes index P/E daily, so month-end values are known the
+# next business day (publication lags per source are an open question).
+key: data_trackers.valuation
+name: Data Trackers – equity valuation log
+mapping:
+  sheet: Data Trackers
+  header_row_match: Month
+  date_column: {name: Month, format: Jan-2006, obs_date: month_end}
+  columns:
+    - {name: "Nifty 100 P/E", series: pe.nifty100}
+    - {name: "Midcap 150 P/E", series: pe.midcap150}
+    - {name: "Smallcap 250 P/E", series: pe.smallcap250}
+  ignore_columns: ["Mid–Large Spread", "Small–Large Spread", "Mid Spread %ile", "Small Spread %ile"]
+  known_at: "obs_date_plus_days:1"

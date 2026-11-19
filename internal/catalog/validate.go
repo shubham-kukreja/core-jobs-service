@@ -52,6 +52,14 @@ func (p problems) err(msg string) error {
 	return apperr.New(apperr.ValidationFailed, msg, p...)
 }
 
+// ValidateSeriesInput applies SaveSeries' defaults and runs every check that
+// does not need the database, so seed files can be checked offline. The
+// derivation's primitive and params are checked by DerivationValidator.
+func ValidateSeriesInput(in SeriesInput) (SeriesInput, error) {
+	err := normalizeSeries(&in)
+	return in, err
+}
+
 // normalizeSeries applies defaults and validates everything that does not
 // need the database. References (entity, inputs, sources) are checked by the
 // store.

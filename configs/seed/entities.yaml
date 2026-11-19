@@ -23,3 +23,4 @@
 - {key: idx.nifty100, kind: index, name: Nifty 100}
 - {key: idx.midcap150, kind: index, name: Nifty Midcap 150}
 - {key: idx.smallcap250, kind: index, name: Nifty Smallcap 250}
+- {key: idx.sp500, kind: index, name: S&P 500}

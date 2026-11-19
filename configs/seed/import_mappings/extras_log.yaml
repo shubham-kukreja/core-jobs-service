@@ -1,0 +1,74 @@
+# Upload template – new columns (Equity, Macro, Flows, Debt and Fundamentals
+# extras from the plan's upload template). One row per month on an "Extras"
+# sheet; the header is the series name. Blank or NA cells are skipped, so
+# columns can be filled in as sources are confirmed. known_at is conservative
+# (mid-following-month) until publication lags per source are confirmed.
+key: upload.extras
+name: Upload template – extras
+mapping:
+  sheet: Extras
+  header_row_match: Month
+  date_column: {name: Month, format: Jan-2006, obs_date: month_end}
+  columns:
+    - {name: "Nifty 50 trailing P/E", series: pe.nifty50}
+    - {name: "Nifty 50 forward P/E", series: pe.nifty50_fwd}
+    - {name: "S&P 500 forward P/E", series: pe.sp500_fwd}
+    - {name: "Nifty 50 total return index", series: tri.nifty50}
+    - {name: "Nifty 50 price index", series: px.nifty50}
+    - {name: "Banking index P/B", series: val.sector.banking}
+    - {name: "IT Services index P/E", series: val.sector.it}
+    - {name: "Pharma index P/E", series: val.sector.pharma}
+    - {name: "Auto index P/E", series: val.sector.auto}
+    - {name: "Capital Goods index P/E", series: val.sector.capgoods}
+    - {name: "FMCG index P/E", series: val.sector.fmcg}
+    - {name: "Energy index P/E", series: val.sector.energy}
+    - {name: "Metals & Mining index P/E", series: val.sector.metals}
+    - {name: "Banking price index", series: px.sector.banking}
+    - {name: "IT Services price index", series: px.sector.it}
+    - {name: "Pharma price index", series: px.sector.pharma}
+    - {name: "Auto price index", series: px.sector.auto}
+    - {name: "Capital Goods price index", series: px.sector.capgoods}
+    - {name: "FMCG price index", series: px.sector.fmcg}
+    - {name: "Energy price index", series: px.sector.energy}
+    - {name: "Metals & Mining price index", series: px.sector.metals}
+    - {name: "Large Cap consensus FY+1 EPS", series: eps.fy1.large}
+    - {name: "Mid Cap consensus FY+1 EPS", series: eps.fy1.mid}
+    - {name: "Small Cap consensus FY+1 EPS", series: eps.fy1.small}
+    - {name: "International consensus FY+1 EPS", series: eps.fy1.intl}
+    - {name: "Banking consensus FY+1 EPS", series: eps.fy1.sector.banking}
+    - {name: "IT Services consensus FY+1 EPS", series: eps.fy1.sector.it}
+    - {name: "Pharma consensus FY+1 EPS", series: eps.fy1.sector.pharma}
+    - {name: "Auto consensus FY+1 EPS", series: eps.fy1.sector.auto}
+    - {name: "Capital Goods consensus FY+1 EPS", series: eps.fy1.sector.capgoods}
+    - {name: "FMCG consensus FY+1 EPS", series: eps.fy1.sector.fmcg}
+    - {name: "Energy consensus FY+1 EPS", series: eps.fy1.sector.energy}
+    - {name: "Metals & Mining consensus FY+1 EPS", series: eps.fy1.sector.metals}
+    - {name: "Large Cap consensus FY+1 EPS growth", series: epsg.fy1.large}
+    - {name: "Mid Cap consensus FY+1 EPS growth", series: epsg.fy1.mid}
+    - {name: "Small Cap consensus FY+1 EPS growth", series: epsg.fy1.small}
+    - {name: "US (S&P 500) consensus FY+1 EPS growth", series: epsg.fy1.us}
+    - {name: "Large Cap aggregate EBITDA margin", series: margin.ebitda.large}
+    - {name: "Mid Cap aggregate EBITDA margin", series: margin.ebitda.mid}
+    - {name: "Small Cap aggregate EBITDA margin", series: margin.ebitda.small}
+    - {name: "US (S&P 500) aggregate EBITDA margin", series: margin.ebitda.us}
+    - {name: "CPI inflation YoY", series: cpi.yoy}
+    - {name: "CPI index", series: cpi.index}
+    - {name: "US 10Y real yield (TIPS, FRED DFII10)", series: tips.10y}
+    - {name: "Global manufacturing PMI", series: pmi.global}
+    - {name: "Active equity funds net flows", series: flows.equity_active}
+    - {name: "Duration funds net flows", series: flows.duration}
+    - {name: "International FoFs net flows", series: flows.intl}
+    - {name: "Active equity funds AUM", series: aum.equity_active}
+    - {name: "Duration funds AUM", series: aum.duration}
+    - {name: "Gold ETF AUM", series: aum.gold_etf}
+    - {name: "Large Cap funds AUM", series: aum.large}
+    - {name: "Mid Cap funds AUM", series: aum.mid}
+    - {name: "Small Cap funds AUM", series: aum.small}
+    - {name: "International FoFs AUM", series: aum.intl}
+    - {name: "Sectoral/Thematic funds AUM", series: aum.sectoral}
+    - {name: "Composite bond index 12M return", series: bondidx.ret12m}
+    - {name: "1Y T-bill yield", series: yield.tbill1y}
+    - {name: "Short-duration category YTM", series: ytm.short}
+    - {name: "Corporate bond category YTM", series: ytm.corporate}
+    - {name: "Gilt / long category YTM", series: ytm.gilt}
+  known_at: "obs_date_plus_days:15"

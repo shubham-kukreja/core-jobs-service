@@ -1,6 +1,4 @@
-# Abridged v1 from the plan. Debt and metals scorecard signals are not in the
-# plan ("…"); they are added from the workbook / CORE Methodology screen
-# (open question in HANDOFF.md) before Phase 3.
+# v1 from the Multi-Asset Allocation Framework v2 workbook (Weights & Rules).
 model: maaf
 name: Multi-Asset Allocation Framework
 version: 1
@@ -40,6 +38,30 @@ config:
       vetoes:
         "*": ["trig.flow_froth.{bucket}", "trig.amc_restrictions.{bucket}", "trig.eps_collapse.{bucket}"]
         equity.intl: [trig.currency_stress]
+    debt:
+      parent: l1.debt
+      buckets: [debt.liquid, debt.corporate, debt.gilt]
+      tilt_cap: 0.30
+      score_series: "{bucket}::{signal}"
+      signals:
+        - {key: carry, weight: 0.30}
+        - {key: rate_cycle, weight: 0.30}
+        - {key: credit_spread, weight: 0.25}
+        - {key: liquidity, weight: 0.15}
+      vetoes:
+        debt.corporate: [trig.credit_event]
+    metals:
+      parent: l1.metals
+      buckets: [metals.gold, metals.silver]
+      tilt_cap: 0.25
+      score_series: "{bucket}::{signal}"
+      signals:
+        - {key: ratio, weight: 0.40}
+        - {key: real_rates, weight: 0.35}
+        - {key: industrial, weight: 0.25}
+      vetoes:
+        metals.gold: [trig.parabolic.gold, trig.flow_froth.metals.gold]
+        metals.silver: [trig.parabolic.silver]
   sector_satellite:
     parent: l1.equity
     sectors: [sector.banking, sector.it, sector.pharma, sector.auto, sector.capgoods, sector.fmcg, sector.energy, sector.metals]

@@ -1,0 +1,14 @@
+# Data Trackers – precious metals log (bullion prices). The ratio, 12M return
+# and %ile columns are recomputed point-in-time (the sheet's Gold Ret %ile was
+# filled without a 12M return; see the plan's sheet issues).
+key: data_trackers.metals
+name: Data Trackers – precious metals log
+mapping:
+  sheet: Data Trackers
+  header_row_match: Month
+  date_column: {name: Month, format: Jan-2006, obs_date: month_end}
+  columns:
+    - {name: "Gold ₹/10g", series: gold.inr10g}
+    - {name: "Silver ₹/kg", series: silver.inrkg}
+  ignore_columns: ["Gold/Silver Ratio", "Gold 12M Return %", "Ratio %ile", "Gold Ret %ile"]
+  known_at: "obs_date_plus_days:1"
