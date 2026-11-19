@@ -97,19 +97,33 @@ type Cascade interface {
 }
 
 // Explainer produces the formula breakdown for one series at one date.
+// A zero d means the series' latest observation at the cutoff.
 type Explainer interface {
 	Explain(ctx context.Context, seriesKey string, d civil.Date, o datapoints.ReadOpts) (Explanation, error)
 }
 
-// Explanation is the generated breakdown shown on the Data Points screen.
+// Explanation is the generated breakdown shown on the Data Points screen:
+// the stored value, the formula, its inputs as of the date, the steps the
+// primitive took, and one Part per derived input explained the same way.
 type Explanation struct {
-	SeriesKey string
-	ObsDate   civil.Date
-	Value     datapoints.Value
-	Formula   string
-	Inputs    []datapoints.Resolved
-	Steps     []ExplainStep
-	Parts     []Explanation // for composite derivations (avg of parts)
+	Series  catalog.Series
+	Alias   string     // the alias a parent reads this series under; "" at the top
+	ObsDate civil.Date // zero when the series has no value at the cutoff
+	Point   *datapoints.Resolved
+	Formula string
+	Inputs  []ExplainInput
+	Steps   []ExplainStep
+	Parts   []Explanation
+	Notes   []string
+}
+
+// ExplainInput is one derivation input as of the explained date.
+type ExplainInput struct {
+	Alias  string
+	Series catalog.Series
+	Point  *datapoints.Resolved // latest observation at or before the date; nil when none
+	// Expanded is true when Parts holds this input's own breakdown.
+	Expanded bool
 }
 
 var (

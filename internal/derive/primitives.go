@@ -139,26 +139,6 @@ func fmtVal(v datapoints.Value) string {
 	return "null"
 }
 
-// explainVia is the shared Explain: the inputs observed at d and the result.
-func explainVia(p Primitive, ctx context.Context, env Env, d civil.Date, in Inputs, raw json.RawMessage) ([]ExplainStep, error) {
-	aliases := make([]string, 0, len(in))
-	for a := range in {
-		aliases = append(aliases, a)
-	}
-	sort.Strings(aliases)
-	parts := make([]string, 0, len(aliases))
-	for _, a := range aliases {
-		v, _ := valAt(in, a, d)
-		parts = append(parts, a+" = "+fmtVal(v))
-	}
-	v, err := p.Compute(ctx, env, d, in, raw)
-	if err != nil {
-		return nil, err
-	}
-	step := ExplainStep{Text: fmt.Sprintf("%s(%s) = %s", p.Name(), strings.Join(parts, ", "), fmtVal(v)), Result: v.Num}
-	return []ExplainStep{step}, nil
-}
-
 // ---- expr ------------------------------------------------------------------
 
 type exprParams struct {
@@ -252,7 +232,7 @@ func (e exprPrim) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p j
 }
 
 func (e exprPrim) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(e, ctx, env, d, in, p)
+	return explainExpr(ctx, e, env, d, in, p)
 }
 
 // ---- rolling_mean ----------------------------------------------------------
@@ -308,7 +288,7 @@ func (rollingMean) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p 
 }
 
 func (r rollingMean) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(r, ctx, env, d, in, p)
+	return explainRollingMean(ctx, r, env, d, in, p)
 }
 
 // ---- ratio_of --------------------------------------------------------------
@@ -369,7 +349,7 @@ func (ratioOf) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p json
 }
 
 func (r ratioOf) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(r, ctx, env, d, in, p)
+	return explainRatio(ctx, r, env, d, in, p)
 }
 
 // ---- pct_change / diff_over --------------------------------------------------
@@ -428,7 +408,7 @@ func (pctChange) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p js
 }
 
 func (c pctChange) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(c, ctx, env, d, in, p)
+	return explainChange(ctx, c, env, d, in, p, true)
 }
 
 type diffOver struct{}
@@ -462,7 +442,7 @@ func (diffOver) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p jso
 }
 
 func (c diffOver) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(c, ctx, env, d, in, p)
+	return explainChange(ctx, c, env, d, in, p, false)
 }
 
 // ---- percentile_rank ---------------------------------------------------------
@@ -529,17 +509,7 @@ func (percentileRank) Compute(_ context.Context, env Env, d civil.Date, in Input
 }
 
 func (r percentileRank) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	x, err := decodePctile(p)
-	if err != nil {
-		return nil, err
-	}
-	steps, err := explainVia(r, ctx, env, d, in, p)
-	if err != nil {
-		return nil, err
-	}
-	n := len(window(in, "x", calendar.WindowStart(d, x.WindowMonths), d))
-	steps = append([]ExplainStep{{Text: fmt.Sprintf("Window: %d observations over %d months ending %s", n, x.WindowMonths, d)}}, steps...)
-	return steps, nil
+	return explainPercentile(ctx, r, env, d, in, p)
 }
 
 // ---- invert ------------------------------------------------------------------
@@ -576,7 +546,7 @@ func (invert) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p json.
 }
 
 func (i invert) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(i, ctx, env, d, in, p)
+	return explainInvert(ctx, i, env, d, in, p)
 }
 
 // ---- avg ---------------------------------------------------------------------
@@ -607,7 +577,7 @@ func (avgPrim) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, _ json
 }
 
 func (a avgPrim) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(a, ctx, env, d, in, p)
+	return explainAvg(ctx, a, env, d, in, p)
 }
 
 // ---- rubric ------------------------------------------------------------------
@@ -678,7 +648,7 @@ func (rubric) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p json.
 }
 
 func (r rubric) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(r, ctx, env, d, in, p)
+	return explainRubric(ctx, r, env, d, in, p)
 }
 
 // ---- bucket_map ----------------------------------------------------------------
@@ -751,7 +721,7 @@ func (bucketMap) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p js
 }
 
 func (b bucketMap) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(b, ctx, env, d, in, p)
+	return explainBucket(ctx, b, env, d, in, p)
 }
 
 // ---- const ---------------------------------------------------------------------
@@ -795,7 +765,7 @@ func (constPrim) Compute(_ context.Context, _ Env, _ civil.Date, _ Inputs, p jso
 }
 
 func (c constPrim) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(c, ctx, env, d, in, p)
+	return explainConst(ctx, c, env, d, in, p)
 }
 
 // ---- threshold / consecutive -----------------------------------------------------
@@ -874,7 +844,7 @@ func (threshold) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p js
 }
 
 func (t threshold) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(t, ctx, env, d, in, p)
+	return explainThreshold(ctx, t, env, d, in, p)
 }
 
 type consecutive struct{}
@@ -923,7 +893,7 @@ func (consecutive) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p 
 }
 
 func (c consecutive) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(c, ctx, env, d, in, p)
+	return explainConsecutive(ctx, c, env, d, in, p)
 }
 
 // ---- fallback ------------------------------------------------------------------
@@ -981,5 +951,5 @@ func (fallback) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p jso
 }
 
 func (f fallback) Explain(ctx context.Context, env Env, d civil.Date, in Inputs, p json.RawMessage) ([]ExplainStep, error) {
-	return explainVia(f, ctx, env, d, in, p)
+	return explainFallback(ctx, f, env, d, in, p)
 }
