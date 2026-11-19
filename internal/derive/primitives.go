@@ -762,8 +762,18 @@ type constParams struct {
 
 type constPrim struct{}
 
-func (constPrim) Name() string                               { return "const" }
-func (constPrim) Aliases(json.RawMessage) []string           { return []string{} }
+func (constPrim) Name() string { return "const" }
+
+// Aliases is nil: const takes no inputs, or one "on" input whose observation
+// dates are the dates the constant is written on (a series with no inputs is
+// never reached by the cascade).
+func (constPrim) Aliases(json.RawMessage) []string { return nil }
+func (constPrim) ValidateInputs(_ json.RawMessage, aliases []string) error {
+	if len(aliases) > 1 || (len(aliases) == 1 && aliases[0] != "on") {
+		return fmt.Errorf("%w: const takes no inputs or a single \"on\" input, got %v", ErrInvalidParams, aliases)
+	}
+	return nil
+}
 func (constPrim) Lookback(json.RawMessage) datapoints.Months { return 0 }
 func (constPrim) ValidateParams(p json.RawMessage) error {
 	var x constParams

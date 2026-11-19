@@ -129,6 +129,25 @@ func TestInvertAvgConst(t *testing.T) {
 	wantNum(t, run(t, "avg", d, Inputs{"a": monthly(2026, 1, 40), "b": monthly(2026, 1, 60), "c": nil}, `{}`), 50)
 	wantNull(t, run(t, "avg", d, Inputs{"a": nil}, `{}`))
 	wantNum(t, run(t, "const", d, nil, `{"value":90}`), 90)
+	wantNum(t, run(t, "const", d, Inputs{"on": monthly(2026, 1, 6.7)}, `{"value":90}`), 90)
+}
+
+func TestConstInputs(t *testing.T) {
+	r := NewDefaultRegistry()
+	for _, tc := range []struct {
+		inputs map[string]string
+		ok     bool
+	}{
+		{nil, true},
+		{map[string]string{"on": "yield.gsec10y"}, true},
+		{map[string]string{"x": "yield.gsec10y"}, false},
+		{map[string]string{"on": "a", "x": "b"}, false},
+	} {
+		_, err := r.ValidateDerivation(catalog.Derivation{Fn: "const", Inputs: tc.inputs, Params: json.RawMessage(`{"value":90}`), Version: 1})
+		if (err == nil) != tc.ok {
+			t.Errorf("inputs %v: err = %v, want ok=%v", tc.inputs, err, tc.ok)
+		}
+	}
 }
 
 func TestRubric(t *testing.T) {
