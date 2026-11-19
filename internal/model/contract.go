@@ -55,6 +55,8 @@ type SectorSatellite struct {
 	MaxSectors       int      `json:"max_sectors"`
 	QualifyThreshold float64  `json:"qualify_threshold"`
 	MaxQuartersHeld  int      `json:"max_quarters_held"`
+	// Vetoes maps a sector (or "*") to trigger series-key templates.
+	Vetoes map[string][]string `json:"vetoes,omitempty"`
 }
 
 // ConstraintRef applies a registered constraint with params.

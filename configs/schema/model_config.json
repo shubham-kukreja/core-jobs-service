@@ -34,7 +34,8 @@
             "sleeve_cap": {"type": "number", "minimum": 0, "maximum": 1},
             "max_sectors": {"type": "integer", "minimum": 1},
             "qualify_threshold": {"type": "number", "minimum": 0, "maximum": 100},
-            "max_quarters_held": {"type": "integer", "minimum": 1}
+            "max_quarters_held": {"type": "integer", "minimum": 1},
+            "vetoes": {"$ref": "#/$defs/vetoes"}
           }
         },
         "constraints": {
@@ -82,11 +83,13 @@
         "tilt_cap": {"type": "number", "minimum": 0, "maximum": 1},
         "signals": {"$ref": "#/$defs/signals"},
         "score_series": {"$ref": "defs.json#/$defs/key_template"},
-        "vetoes": {
-          "type": "object",
-          "additionalProperties": {"type": "array", "items": {"$ref": "defs.json#/$defs/key_template"}}
-        }
+        "vetoes": {"$ref": "#/$defs/vetoes"}
       }
+    },
+    "vetoes": {
+      "description": "Bucket (or \"*\" for all) to trigger series-key templates; any true trigger blocks the bucket's overweight.",
+      "type": "object",
+      "additionalProperties": {"type": "array", "items": {"$ref": "defs.json#/$defs/key_template"}}
     }
   }
 }

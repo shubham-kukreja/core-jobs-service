@@ -75,6 +75,10 @@ config:
     max_sectors: 2
     qualify_threshold: 70
     max_quarters_held: 4
+    # Weights & Rules veto gates for sectors: liquidity (AMC restrictions),
+    # earnings collapse, and flow froth in sectoral/thematic funds.
+    vetoes:
+      "*": ["trig.eps_collapse.{bucket}", "trig.amc_restrictions.{bucket}", trig.flow_froth.sectoral]
   constraints:
     - {name: max_multiple_of_neutral, scorecard: l1, bucket: l1.metals, params: {max: 2.0}}
     - {name: extreme_full_cap, params: {high: 80, low: 20, consecutive_reviews: 2, normal_cap_factor: 1.0}}
