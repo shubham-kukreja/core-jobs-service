@@ -4,6 +4,117 @@ Shared log between the lead and teams. Newest entry first. Each entry says
 what's done, what's next, and any contract change. The plan is `docs/plan.md`
 and security rules are in `docs/security.md`.
 
+## 2026-11-19 — Phase 2 close-out and Gate G2 (lead)
+
+**The workbook is available.** The Multi-Asset Allocation Framework v2
+workbook (a Google Sheet; ask the lead for the link) has the Calculation
+Guide with an exact recipe for every score. It resolves open question 1
+(debt and metals signals and weights) and supersedes the plan's "per
+Calculation Guide" placeholders.
+
+**Done**
+
+- **P2-T7-03:** `configs/seed/series.yaml` now has all 374 series:
+  - the four Data Trackers logs and the upload template's 61 new columns
+  - 38 analyst judgments and the breadth counts
+  - derived, window and percentile series
+  - all **85 scores**: L1 15, equity 20, debt 12, metals 6, sectors 32
+  - 32 veto triggers
+
+  Import mappings cover the valuation, rates, metals and flows logs plus an
+  `Extras` sheet. `model_maaf_v1.yaml` gains the debt and metals scorecards.
+  Tests load every series through `catalog.ValidateSeriesInput` and the
+  derive registry. They also pin one score per scorecard bucket and signal,
+  require a trigger series for every veto, check that category tables cover
+  every allowed judgment value, and compute every derivation once on
+  synthetic history.
+- **`app seed apply DIR --as EMAIL`** (admin only):
+  - Writes sources (new `catalog.Writer.SaveSource`), entities, series and
+    import mappings.
+  - The catalog part is one transaction, with an audit row and a single
+    `derive.cascade` rebuild for new or changed derivations.
+  - Re-applying is a no-op, and a bad seed rolls back completely.
+  - Schedules are not applied yet, because their kinds land in Phase 3.
+- **`const` takes an optional `on` input.** A series with no inputs is never
+  reached by the cascade. Constant scores (Liquid liquidity 90, Gilt 75,
+  non-driver 50) tick on the 10Y G-sec log.
+- **Gate G2 tests:**
+  - `e2e/g2_test.go` imports the workbook's Data Trackers layout through
+    `import.file`. The layout is four stacked logs ending with the
+    workbook's real Jan–Mar 2026 rows, after 33 months of deterministic
+    history. The extras sheet and the analyst entries are added too.
+  - `e2e/pit_test.go` is the plan's look-ahead test.
+
+**Bug found and fixed:** the parser took the first "Month" row as the header
+and read to the end of the sheet. On the real Data Trackers sheet, three of
+the four mappings failed. Worse, the valuation mapping read the rates rows
+below it as P/E values. Now each mapping finds its own header (the row that
+also names every mapped column) and stops at the next "Month" header.
+
+**Gate G2: passed on 2026-11-19.** `make up && make test` is green with
+`-race` against real Postgres 16, River and S3, with no test skipped, and
+`make lint` is clean.
+- **Every computed series computes:** all 242 have a March 2026 value.
+- **Spot checks match the workbook's formulas:** spreads, AAA bps,
+  gold/silver ratio and the constants.
+- **No look-ahead:** Jan-2026's 10Y percentile ranks only history up to
+  January, and no input of 5,478 computed rows has a later `obs_date` or
+  `known_at`.
+- **Re-import is a no-op:** it writes 0 rows and starts no cascade.
+
+**Interpretations of the Calculation Guide (owner to confirm).** Each one is
+a single derivation in `series.yaml`, so a change is a version bump.
+
+1. **International valuation:** ±5 points when the US–India forward P/E gap
+   percentile is ≥ 90 or ≤ 10. The guide says 5–10 points and gives no
+   threshold.
+2. **Silver industrial demand:**
+   - PMI > 52 and rising scores 70. PMI ≥ 50 otherwise scores 55, which
+     covers "> 52 but falling" (the guide doesn't say). Below 50 scores 35.
+   - Solar/EV news flow adds 5, capped at 100.
+3. **Margin / cycle rubric:**
+   - Applied to mid and small caps only ("domestic mid/small" in Weights &
+     Rules). Large and international caps use margin percentile only.
+   - "Credit growth not accelerating" adds 0. The guide says "else
+     0/negative".
+4. **EPS collapse:** the FY+1 consensus EPS falls more than 15% over 3
+   months. The guide gives no horizon.
+5. **Sector revisions:** the guide's alternative to breadth, a 3M change in
+   sector consensus EPS, as a percentile, ±5 for the results season.
+   **International revisions:** US EPS 3M change.
+6. **Real-rates (TIPS) bands:** lower bounds are inclusive. A move of
+   exactly −50bp counts as "fell 10–50". In the metals split, a rise over
+   50bp uses the "rising" row (40/45).
+7. **Debt macro:**
+   - Cuts of either size add 20, and hikes of either size subtract 15.
+   - "Inflation below target" is its own judgment.
+8. **International EPS growth differential:** "India" means Large Cap
+   (Nifty 100) growth.
+9. **Flow froth:** the percentile of 3M average flows as % of AUM is ≥ 90
+   for 3 consecutive months. Sectors share the aggregate sectoral/thematic
+   flow. Debt buckets have no froth trigger.
+10. **Percentile windows:** 15Y by default, and 20Y for real gold price and
+    the gold/silver ratio. The per-group windows remain open.
+11. **`known_at` lags are provisional:** valuation and metals +1d, rates
+    +5d, flows +10d, extras +15d.
+
+**Next**
+
+- **Phase 3:**
+  - `sector_satellite` has no `vetoes` in the schema yet. The
+    `trig.eps_collapse.sector.*`, `trig.amc_restrictions.sector.*` and
+    `trig.flow_froth.sectoral` series exist for P3-T5-03 to wire in.
+  - P3-T7-04 should take golden inputs from the workbook's scoring sheets
+    instead of the plan's worked numbers.
+- **Not done in Phase 2:**
+  - P2-T3-07: `Explain()` exists on every primitive, but the explain
+    endpoint has no handler yet.
+  - P2-T8-01 (migration inventory).
+- **Coverage gaps still open:** `jobs` (48% in-package) and `auth` (75%).
+- **`make mocks`:** the mockery config also emits mocks for unexported
+  interfaces, which don't compile. Delete the untracked files it creates
+  until the config is fixed.
+
 ## 2026-11-02 — Phase 1 integration (lead)
 
 **Done**
@@ -374,11 +485,11 @@ rollup weight). That task is still blocked on the workbook.
 
 **Open questions** (owner's answer needed before the phase noted)
 
-1. P3: the debt and metals scorecard signals and weights. They are "…" in the
-   plan, so they are not in `model_maaf_v1.yaml` yet. Source: the workbook or
-   the CORE Methodology screen.
-2. P3: the Multi-Asset Allocation Framework workbook itself, for the golden
-   fixtures (P1-T7-01). Until then, golden tests use the plan's worked numbers.
+1. ~~P3: the debt and metals scorecard signals and weights.~~ Resolved
+   2026-11-19 from the workbook's Weights & Rules.
+2. ~~P3: the Multi-Asset Allocation Framework workbook itself.~~ Available
+   2026-11-19; golden fixtures still use the plan's worked numbers until
+   P3-T7-04 switches to the workbook's scoring sheets.
 3. From the plan, unchanged:
    - Revert mode (`all` vs `manual_and_params`).
    - Legacy backend access.
