@@ -21,6 +21,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/datapoints"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
 	"github.com/shubham-kukreja/core-jobs-service/internal/model"
+	"github.com/shubham-kukreja/core-jobs-service/internal/model/modeltest"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/database"
@@ -88,7 +89,7 @@ func (e *env) writeWorkbook(d civil.Date) {
 		return cv.Config.SectorSatellite.Signals
 	}
 	var pts []datapoints.Point
-	for b, vals := range model.WorkbookScores {
+	for b, vals := range modeltest.Scores {
 		for i, sg := range signals(b) {
 			pts = append(pts, datapoints.Point{SeriesKey: b + "::" + sg.Key, ObsDate: d, Value: datapoints.Num(vals[i]), KnownAt: knownAt})
 		}
@@ -148,7 +149,7 @@ func TestModelRunGolden(t *testing.T) {
 		t.Fatalf("run = %+v, warnings %+v", run, res.Warnings)
 	}
 	stored := nodes(t, e.core.Model, run)
-	for key, want := range model.WorkbookOutputs {
+	for key, want := range modeltest.Outputs {
 		n, ok := stored[key]
 		if !ok || n.Num == nil || math.Abs(*n.Num-want) > 1e-9 {
 			t.Errorf("%s = %v, workbook %v", key, n.Num, want)
@@ -164,7 +165,10 @@ func TestModelRunGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := model.WorkbookPortfolio
+	want := map[string]float64{}
+	for _, l := range modeltest.Lines {
+		want[l.Item] = l.Weight
+	}
 	total := decimal.Zero
 	for _, l := range alloc {
 		if d := math.Abs(l.PortfolioWeight.InexactFloat64() - want[l.LineItem]); d > 0.0005 {
