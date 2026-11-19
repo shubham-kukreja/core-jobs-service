@@ -1,6 +1,8 @@
 # Mocks of module contracts, so teams code against other modules' interfaces.
 # Regenerate with `make mocks` after changing any contract.go.
-all: true
+# Only exported interfaces: mocks live in another package and cannot name
+# unexported ones.
+include-interface-regex: "^[A-Z]"
 template: matryer
 dir: "{{.InterfaceDir}}/mocks"
 filename: "{{.InterfaceName | snakecase}}.go"
