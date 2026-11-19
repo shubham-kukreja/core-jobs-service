@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"strings"
@@ -65,7 +66,9 @@ func buildXLSX(t *testing.T, sheet string, rows [][]string, extra map[string]str
 	var ss strings.Builder
 	ss.WriteString(`<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
 	for _, s := range shared {
-		fmt.Fprintf(&ss, `<si><t>%s</t></si>`, s)
+		ss.WriteString(`<si><t>`)
+		_ = xml.EscapeText(&ss, []byte(s))
+		ss.WriteString(`</t></si>`)
 	}
 	ss.WriteString(`</sst>`)
 	parts := map[string]string{
@@ -238,5 +241,70 @@ func TestValidateMappingAndKnownAt(t *testing.T) {
 	rule, _ := knownAtRule("obs_date_plus_days:5")
 	if got := rule(civil.Date{Year: 2026, Month: 5, Day: 31}, now); !got.Equal(now) {
 		t.Errorf("known_at must not pass now: %v", got)
+	}
+}
+
+// stackedGrid mirrors the workbook's Data Trackers sheet: a title row, then
+// each log's own "Month" header, its rows, rows left blank by formulas, and
+// the next log's title and header directly below.
+func stackedGrid() [][]string {
+	return [][]string{
+		{"Data Trackers"},
+		{"Equity valuation log (index P/E, niftyindices.com)"},
+		{"Month", "Nifty 100 P/E", "Midcap 150 P/E", "Mid–Large Spread"},
+		{"Jan-2026", "22.5", "33.1", "10.6"},
+		{"Feb-2026", "21.8", "31.9", "10.1"},
+		{"", "", "", ""}, // formula row with nothing logged yet
+		{"Rates & credit log (RBI/CCIL, FIMMDA or broker reports)"},
+		{"Month", "10Y G-sec Yield %", "3Y AAA Corp Yield %", "AAA Spread (bps)"},
+		{"Jan-2026", "6.75", "7.40", "65"},
+		{"Feb-2026", "6.68", "7.30", "62"},
+		{"Mar-2026", "6.72", "7.38", "66"},
+		{"", "", "", ""},
+		{"Precious metals log"},
+		{"Month", "Gold ₹/10g"},
+		{"Jan-2026", "78500"},
+	}
+}
+
+func TestParseStackedTables(t *testing.T) {
+	valuation := Mapping{
+		Sheet: "Data Trackers", HeaderRowMatch: "Month",
+		DateColumn:    DateColumn{Name: "Month", Format: "Jan-2006", ObsDate: "month_end"},
+		Columns:       []ColumnMap{{Name: "Nifty 100 P/E", Series: "pe.nifty100"}, {Name: "Midcap 150 P/E", Series: "pe.midcap150"}},
+		IgnoreColumns: []string{"Mid–Large Spread"},
+		KnownAt:       "now",
+	}
+	rates := ratesMapping
+	rates.IgnoreColumns = []string{"AAA Spread (bps)"}
+	data := buildXLSX(t, "Data Trackers", stackedGrid(), nil)
+
+	for name, tc := range map[string]struct {
+		m     Mapping
+		lines []int
+		first string
+	}{
+		// The valuation log stops at the rates log's header: its rows are
+		// never read as P/E values.
+		"valuation": {valuation, []int{4, 5}, "22.5"},
+		// The rates log finds its own header, not the first "Month" row.
+		"rates": {rates, []int{9, 10, 11}, "6.75"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rows, err := NewParser().Parse(context.Background(), bytes.NewReader(data), MediaXLSX, tc.m, DefaultLimits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var lines []int
+			for _, r := range rows {
+				lines = append(lines, r.Line)
+			}
+			if fmt.Sprint(lines) != fmt.Sprint(tc.lines) {
+				t.Fatalf("lines = %v, want %v", lines, tc.lines)
+			}
+			if got := rows[0].Cells[tc.m.Columns[0].Name]; got != tc.first {
+				t.Fatalf("first value = %q, want %q", got, tc.first)
+			}
+		})
 	}
 }

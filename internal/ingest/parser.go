@@ -34,10 +34,15 @@ type parser struct{}
 // NewParser returns the CSV and XLSX parser.
 func NewParser() Parser { return parser{} }
 
-// Parse reads the file, finds the header row (the first row with a cell equal
-// to m.HeaderRowMatch), checks every mapped column exists and every other
-// column is ignored, and returns the data rows keyed by header name. Only the
-// date column and mapped columns are kept.
+// Parse reads the file, finds the header row, checks every mapped column
+// exists and every other column is ignored, and returns the data rows keyed by
+// header name. Only the date column and mapped columns are kept.
+//
+// A sheet may stack several tables (the workbook's Data Trackers holds four
+// logs, each headed "Month"), so the header row is the first row with a cell
+// equal to m.HeaderRowMatch that also names every mapped column, and the table
+// ends at the next row whose date cell is m.HeaderRowMatch again. Rows with no
+// mapped value (section titles, date-only rows) carry nothing and are skipped.
 func (parser) Parse(ctx context.Context, r io.Reader, contentType string, m Mapping, lim Limits) ([]Row, error) {
 	data, err := io.ReadAll(io.LimitReader(r, lim.MaxUncompressedSize+1))
 	if err != nil {
@@ -97,24 +102,32 @@ func readCSV(data []byte, lim Limits) ([][]string, error) {
 }
 
 func mapGrid(grid [][]string, m Mapping) ([]Row, error) {
-	hdr := -1
+	want := map[string]bool{m.DateColumn.Name: true}
+	for _, c := range m.Columns {
+		want[c.Name] = true
+	}
+	hdr, first := -1, -1
 	for i, row := range grid {
+		cells := map[string]bool{}
 		for _, c := range row {
-			if strings.TrimSpace(c) == m.HeaderRowMatch {
-				hdr = i
-				break
-			}
+			cells[strings.TrimSpace(c)] = true
 		}
-		if hdr >= 0 {
+		if !cells[m.HeaderRowMatch] {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		if hasAll(cells, want) {
+			hdr = i
 			break
 		}
 	}
 	if hdr < 0 {
-		return nil, fmt.Errorf("%w: no header row containing %q", ErrBadMapping, m.HeaderRowMatch)
+		hdr = first // reports which mapped column is missing below
 	}
-	want := map[string]bool{m.DateColumn.Name: true}
-	for _, c := range m.Columns {
-		want[c.Name] = true
+	if hdr < 0 {
+		return nil, fmt.Errorf("%w: no header row containing %q", ErrBadMapping, m.HeaderRowMatch)
 	}
 	ignored := map[string]bool{}
 	for _, c := range m.IgnoreColumns {
@@ -139,24 +152,37 @@ func mapGrid(grid [][]string, m Mapping) ([]Row, error) {
 			return nil, fmt.Errorf("%w: column %q not in file", ErrBadMapping, name)
 		}
 	}
+	dateIdx := idx[m.DateColumn.Name]
 	var rows []Row
 	for i := hdr + 1; i < len(grid); i++ {
+		if dateIdx < len(grid[i]) && strings.TrimSpace(grid[i][dateIdx]) == m.HeaderRowMatch {
+			break // the next table's header
+		}
 		cells := map[string]string{}
-		empty := true
+		hasValue := false
 		for name, j := range idx {
 			if j < len(grid[i]) {
 				v := strings.TrimSpace(grid[i][j])
 				cells[name] = v
-				if v != "" {
-					empty = false
+				if v != "" && name != m.DateColumn.Name {
+					hasValue = true
 				}
 			}
 		}
-		if !empty {
+		if hasValue {
 			rows = append(rows, Row{Line: i + 1, Cells: cells})
 		}
 	}
 	return rows, nil
+}
+
+func hasAll(have, want map[string]bool) bool {
+	for k := range want {
+		if !have[k] {
+			return false
+		}
+	}
+	return true
 }
 
 // Reasons for rows the importer rejects before they reach the writer.
