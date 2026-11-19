@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/shubham-kukreja/core-jobs-service/internal/audit"
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/datapoints"
 	"github.com/shubham-kukreja/core-jobs-service/internal/derive"
@@ -20,6 +21,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/config"
 	"github.com/shubham-kukreja/core-jobs-service/internal/quality"
+	"github.com/shubham-kukreja/core-jobs-service/internal/seed"
 )
 
 // Core holds the modules shared by the api and worker processes.
@@ -155,4 +157,14 @@ func NewBlobStore(ctx context.Context, cfg config.Config) (blob.Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// SeedTarget is where `app seed apply` writes: the catalog, import mappings,
+// the audit log, and derive.cascade rebuilds for new or changed derivations.
+func (c *Core) SeedTarget() seed.Target {
+	maps := c.Mappings
+	if maps == nil {
+		maps = ingest.NewMappings(c.Pool, c.Catalog)
+	}
+	return seed.Target{DB: c.Pool, Catalog: c.Catalog, Mappings: maps, Audit: audit.NewPG(c.Pool), Rebuilds: rebuilds{c.Jobs}}
 }

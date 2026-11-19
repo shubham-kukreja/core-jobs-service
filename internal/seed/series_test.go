@@ -221,10 +221,10 @@ func TestEveryDerivationComputes(t *testing.T) {
 		for i := 29; i >= 0; i-- {
 			d := calendar.MonthEnd(calendar.AddMonths(asOf, -i))
 			var v datapoints.Value
-			switch {
-			case in.ValueType == catalog.ValueCat:
+			switch in.ValueType {
+			case catalog.ValueCat:
 				v = datapoints.Cat(in.AllowedValues[i%len(in.AllowedValues)])
-			case in.ValueType == catalog.ValueBool:
+			case catalog.ValueBool:
 				v = datapoints.Bool(i%2 == 0)
 			default:
 				v = datapoints.Num(40 + float64(i%7)*3) // varied, positive, 40..58
