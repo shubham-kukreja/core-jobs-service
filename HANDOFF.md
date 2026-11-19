@@ -4,6 +4,91 @@ Shared log between the lead and teams. Newest entry first. Each entry says
 what's done, what's next, and any contract change. The plan is `docs/plan.md`
 and security rules are in `docs/security.md`.
 
+## 2026-11-19 — Phase 3 core and Gate G3 (lead)
+
+**Done**
+
+- **Phase 2 leftovers:**
+  - P2-T3-07: `GET /v1/series/{key}/explain`. `derive.Explainer` walks the
+    formula tree at the caller's cutoff (bounded depth and node count).
+    Each primitive's `Explain` writes the formula with values substituted,
+    e.g. `(gap + (100 - pe)) / 2 = (33.33 + (100 - 66.67)) / 2 = 33.33`.
+    A note appears wherever the current formula doesn't reproduce the
+    stored value. G2 checks all 85 scores reproduce at every level.
+  - `make mocks` now generates exported interfaces only.
+- **P3-T5-01…04, the engine** (`internal/model`). `Evaluate` is pure and
+  runs the config's steps in order:
+  - composite → veto → tilt → sector_qualify → constraints → normalize
+    (proportional or zero_sum) → sleeve → rollup
+  - each step writes `<bucket>::<node>` values with lineage and a formula
+    string, and applies node overrides
+  - the allocation is rounded to 6 dp by largest remainder, so each group
+    and the portfolio sum to exactly 1
+  - one evaluation takes about 0.25 ms against the 50 ms budget
+- **Constraints and config checks:**
+  - constraints: `max_multiple_of_neutral` (caps the tilt at max − 1),
+    `extreme_full_cap` (factor 1.0 is a no-op until the rule is
+    clarified) and `sector_max_tenure`
+  - `CheckConfig` returns every problem with a JSON pointer
+  - the `Validator` also checks that every referenced series exists
+- **P3-T5-05/06:**
+  - `model.Store` (sqlc) holds configs, risk profiles, portfolios, runs,
+    run values, allocations and overrides.
+  - `model.run` runs the active config, or a draft version as a what-if
+    that can't be published.
+  - Runs record their inputs, so `Replay` reproduces the run and its
+    derivation hash.
+  - `veto.evaluate` writes `veto.<bucket>` from the triggers, and trigger
+    writes enqueue it.
+- **P3-T6-04:** configs, runs, allocations, overrides and risk-profile
+  endpoints, conformance-tested. `model.run` with `publish: true` needs
+  admin (`jobs.ArgsRole`).
+- **Seed:** `app seed apply` now loads the model config, risk profiles, the
+  `core` portfolio and any missing schedules. `review:*` calendars read
+  the active config.
+- **P3-T7-04 / Gate G3: passed on 2026-11-19.** Fixtures are in
+  `internal/model/modeltest`. The workbook's scoring-sheet inputs are fed
+  through the shipped config:
+  - the engine matches every cached L1, L2, sector and rollup value within
+    1e-9
+  - the stored allocation is within 0.05pp, through both the database and
+    the queue
+  - a draft-config what-if (wider L1 cap, lower sector bar) moves the
+    allocation while the published run, its allocation and the active
+    config stay put
+
+**Decisions (lead)**
+
+- **Scores and triggers are read as of `as_of`:** the latest value at most
+  3 months old for a score, 12 months for a trigger, at the knowledge
+  cutoff. An older score counts as missing (50, with a warning).
+- **Satellite history counts reviews, not runs:** one published run per
+  `as_of` date.
+- **Veto state comes from the triggers:** the engine computes it from
+  trigger datapoints using the config's veto map. `veto.*` datapoints are
+  for display and lineage, built with the same rule.
+- **Sector vetoes:** a sector is vetoed by earnings collapse, AMC
+  restrictions or sectoral flow froth.
+- **Config drafts are stored even when invalid:** validation is reported.
+  `activate` refuses an invalid config.
+- **Fix found by G2:** once trigger imports started enqueueing
+  `veto.evaluate`, a changed veto collided on `known_at`. It is now
+  written as knowable now, as the cascade does. The look-ahead lineage
+  check also skipped rows of series with no derivation; it now covers
+  them.
+
+**Not done in Phase 3** (the plan's added tasks)
+
+- P3-T5-07 remainder: neutral portfolio weights as a separate view.
+  `Evaluate` and both normalisation modes are done.
+- P3-T5-08 shared draft, versions, compare and revert, and P3-T6-07 draft,
+  rubric, versions, signals, cadence, search and notes endpoints.
+- P3-T5-09 attribution, sensitivity and fragility.
+- P3-T9-01/02 funds, NAVs, benchmarks and `backtest.run`.
+- P2-T8-01 / P3-T8-02 migration: blocked on legacy backend access.
+- `/v1/portfolios/{portfolio}/allocation`.
+- Coverage: `model` 77%, `api` 79%, `jobs` 48%, `auth` 75%.
+
 ## 2026-11-19 — Phase 2 close-out and Gate G2 (lead)
 
 **The workbook is available.** The Multi-Asset Allocation Framework v2
@@ -100,20 +185,8 @@ a single derivation in `series.yaml`, so a change is a version bump.
 
 **Next**
 
-- **Phase 3:**
-  - `sector_satellite` has no `vetoes` in the schema yet. The
-    `trig.eps_collapse.sector.*`, `trig.amc_restrictions.sector.*` and
-    `trig.flow_froth.sectoral` series exist for P3-T5-03 to wire in.
-  - P3-T7-04 should take golden inputs from the workbook's scoring sheets
-    instead of the plan's worked numbers.
-- **Not done in Phase 2:**
-  - P2-T3-07: `Explain()` exists on every primitive, but the explain
-    endpoint has no handler yet.
-  - P2-T8-01 (migration inventory).
-- **Coverage gaps still open:** `jobs` (48% in-package) and `auth` (75%).
-- **`make mocks`:** the mockery config also emits mocks for unexported
-  interfaces, which don't compile. Delete the untracked files it creates
-  until the config is fixed.
+- Superseded by the Phase 3 entry above: sector vetoes, workbook golden
+  inputs, the explain endpoint and the mockery config are all done.
 
 ## 2026-11-02 — Phase 1 integration (lead)
 
