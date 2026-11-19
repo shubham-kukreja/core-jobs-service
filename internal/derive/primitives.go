@@ -76,11 +76,11 @@ func numAsOf(in Inputs, alias string, from, d civil.Date) (float64, bool) {
 	return 0, false
 }
 
-// window returns numeric values with obs_date in [from, d], oldest first.
+// window returns x's numeric values with obs_date in [from, d], oldest first.
 // Anything after d is ignored even if a caller passes it: no look-ahead.
-func window(in Inputs, alias string, from, d civil.Date) []float64 {
+func window(in Inputs, from, d civil.Date) []float64 {
 	var out []float64
-	for _, r := range in[alias] {
+	for _, r := range in["x"] {
 		if r.ObsDate.Before(from) || r.ObsDate.After(d) || r.Value.Num == nil {
 			continue
 		}
@@ -275,7 +275,7 @@ func (rollingMean) Compute(_ context.Context, _ Env, d civil.Date, in Inputs, p 
 	if _, ok := numAt(in, "x", d); !ok {
 		return null, nil
 	}
-	vals := window(in, "x", calendar.WindowStart(d, x.Periods), d)
+	vals := window(in, calendar.WindowStart(d, x.Periods), d)
 	if len(vals) < x.Periods {
 		return null, nil
 	}
@@ -495,7 +495,7 @@ func (percentileRank) Compute(_ context.Context, env Env, d civil.Date, in Input
 	if minObs == 0 {
 		minObs = max(env.Governance.PercentileMinObservations, 2)
 	}
-	vals := window(in, "x", calendar.WindowStart(d, x.WindowMonths), d)
+	vals := window(in, calendar.WindowStart(d, x.WindowMonths), d)
 	if len(vals) < minObs {
 		return null, nil
 	}

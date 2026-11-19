@@ -25,6 +25,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/auth"
 	catalogmocks "github.com/shubham-kukreja/core-jobs-service/internal/catalog/mocks"
 	dpmocks "github.com/shubham-kukreja/core-jobs-service/internal/datapoints/mocks"
+	derivemocks "github.com/shubham-kukreja/core-jobs-service/internal/derive/mocks"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 )
@@ -176,6 +177,7 @@ type harness struct {
 	cat     *catalogmocks.Catalog
 	reader  *dpmocks.Reader
 	writer  *dpmocks.Writer
+	explain *derivemocks.Explainer
 	rebuild *fakeRebuilder
 	enq     *jobsmocks.Enqueuer
 	runs    *jobsmocks.Runs
@@ -193,7 +195,7 @@ var testNow = time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 func newHarness(t *testing.T, mutate ...func(*Config, *Deps)) *harness {
 	t.Helper()
 	hs := &harness{
-		t: t, db: &fakeDB{}, cat: &catalogmocks.Catalog{}, reader: &dpmocks.Reader{}, writer: &dpmocks.Writer{},
+		t: t, db: &fakeDB{}, cat: &catalogmocks.Catalog{}, reader: &dpmocks.Reader{}, writer: &dpmocks.Writer{}, explain: &derivemocks.Explainer{},
 		rebuild: &fakeRebuilder{}, clock: clock.NewFake(testNow), logs: &bytes.Buffer{},
 		enq: &jobsmocks.Enqueuer{}, runs: &jobsmocks.Runs{}, scheds: &jobsmocks.Schedules{}, kinds: jobs.NewRegistry(),
 		uploads: &ingestmocks.Uploads{}, maps: &ingestmocks.Mappings{},
@@ -217,7 +219,7 @@ func newHarness(t *testing.T, mutate ...func(*Config, *Deps)) *harness {
 	}
 	deps := Deps{
 		DB: hs.db, Auth: hs.auth, Users: fakeUsers{1: adminUser, 2: analystUser, 3: viewerUser}, Audit: auditor,
-		Catalog: hs.cat, Reader: hs.reader, Writer: hs.writer, Rebuilds: hs.rebuild,
+		Catalog: hs.cat, Reader: hs.reader, Writer: hs.writer, Explainer: hs.explain, Rebuilds: hs.rebuild,
 		Idempotency: &memIdem{recs: map[string]IdemRecord{}}, Clock: hs.clock,
 		Jobs: JobDeps{Jobs: hs.enq, Runs: fakeRuns{hs.runs}, Schedules: hs.scheds, Kinds: hs.kinds, Uploads: hs.uploads, Mappings: hs.maps},
 		Log:  slog.New(slog.NewJSONHandler(hs.logs, nil)),

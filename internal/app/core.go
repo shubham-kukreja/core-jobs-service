@@ -33,6 +33,7 @@ type Core struct {
 	Datapoints    *datapoints.Store
 	Primitives    derive.Registry
 	Cascade       derive.Cascade
+	Explainer     derive.Explainer
 	Quality       quality.Checker
 	Uploads       ingest.Uploads  // nil until EnableIngest
 	Mappings      ingest.Mappings // nil until EnableIngest
@@ -66,13 +67,16 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 	qc := quality.NewChecker(cat, dps, DefaultGovernance.PercentileMinObservations)
 	quality.RegisterCheck(reg, qc, clk)
 	return &Core{
-		Pool:          pool,
-		Clock:         clk,
-		Log:           log,
-		Catalog:       cat,
-		Datapoints:    dps,
-		Primitives:    prims,
-		Cascade:       casc,
+		Pool:       pool,
+		Clock:      clk,
+		Log:        log,
+		Catalog:    cat,
+		Datapoints: dps,
+		Primitives: prims,
+		Cascade:    casc,
+		Explainer: derive.NewExplainer(derive.ExplainerDeps{
+			Catalog: cat, Reader: dps, Registry: prims, Clock: clk, Governance: DefaultGovernance,
+		}),
 		Quality:       qc,
 		Registry:      reg,
 		ScheduleTypes: types,

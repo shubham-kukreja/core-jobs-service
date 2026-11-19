@@ -25,6 +25,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/app"
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/datapoints"
+	"github.com/shubham-kukreja/core-jobs-service/internal/derive"
 	"github.com/shubham-kukreja/core-jobs-service/internal/ingest"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/blob"
@@ -478,6 +479,48 @@ func TestG2ImportComputeNoLookAheadReimport(t *testing.T) {
 	}
 	if got, want := num("pctile.180m.yield.gsec10y", jan), 100*float64(less)/float64(len(hist)-1); math.Abs(got-want) > 1e-9 {
 		t.Errorf("Jan-2026 10Y %%ile = %v, want %v from %d observations up to Jan", got, want, len(hist))
+	}
+
+	// The explain breakdown (P2-T3-07) reproduces every stored score through
+	// its whole formula tree: no level's recomputation drifts from the
+	// stored value. Equity - Valuation has the plan's shape.
+	ex, err := g.core.Explainer.Explain(ctx, "l1.equity::valuation", civil.Date{}, datapoints.ReadOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex.ObsDate != g2Last || len(ex.Parts) != 2 || ex.Parts[0].Alias != "gap" || ex.Parts[1].Alias != "pe" ||
+		len(ex.Steps) == 0 || ex.Steps[len(ex.Steps)-1].Result == nil ||
+		math.Abs(*ex.Steps[len(ex.Steps)-1].Result-num("l1.equity::valuation", g2Last)) > 1e-9 {
+		t.Errorf("valuation explain = %s %d parts, steps %+v", ex.ObsDate, len(ex.Parts), ex.Steps)
+	}
+	scores, err := g.db.Owner.Query(ctx, `SELECT key FROM catalog.series WHERE layer = 'score' ORDER BY key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scoreKeys []string
+	for scores.Next() {
+		var k string
+		if err := scores.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		scoreKeys = append(scoreKeys, k)
+	}
+	scores.Close()
+	for _, k := range scoreKeys {
+		ex, err := g.core.Explainer.Explain(ctx, k, g2Last, datapoints.ReadOpts{})
+		if err != nil {
+			t.Fatalf("explain %s: %v", k, err)
+		}
+		var walk func(e derive.Explanation)
+		walk = func(e derive.Explanation) {
+			for _, n := range e.Notes {
+				t.Errorf("explain %s: %s: %s", k, e.Series.Key, n)
+			}
+			for _, p := range e.Parts {
+				walk(p)
+			}
+		}
+		walk(ex)
 	}
 
 	// 3. No computed value uses future data.

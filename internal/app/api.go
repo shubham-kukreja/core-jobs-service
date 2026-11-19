@@ -63,6 +63,7 @@ func (c *Core) NewAPI(cfg config.Config) (http.Handler, error) {
 		Catalog:     c.Catalog,
 		Reader:      c.Datapoints,
 		Writer:      c.Datapoints,
+		Explainer:   c.Explainer,
 		Rebuilds:    rebuilds{c.Jobs},
 		Idempotency: api.NewPGIdempotency(c.Pool),
 		Connectors:  noConnectors{},

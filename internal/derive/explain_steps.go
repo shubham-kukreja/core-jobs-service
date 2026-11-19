@@ -89,7 +89,7 @@ func explainRollingMean(ctx context.Context, p Primitive, env Env, d civil.Date,
 	if err != nil {
 		return nil, err
 	}
-	vals := window(in, "x", calendar.WindowStart(d, x.Periods), d)
+	vals := window(in, calendar.WindowStart(d, x.Periods), d)
 	if len(vals) > x.Periods {
 		vals = vals[len(vals)-x.Periods:]
 	}
@@ -159,7 +159,7 @@ func explainPercentile(ctx context.Context, p Primitive, env Env, d civil.Date, 
 		return nil, err
 	}
 	from := calendar.WindowStart(d, x.WindowMonths)
-	n := len(window(in, "x", from, d))
+	n := len(window(in, from, d))
 	minObs := x.MinObs
 	if minObs == 0 {
 		minObs = max(env.Governance.PercentileMinObservations, 2)

@@ -20,6 +20,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/auth"
 	"github.com/shubham-kukreja/core-jobs-service/internal/catalog"
 	"github.com/shubham-kukreja/core-jobs-service/internal/datapoints"
+	"github.com/shubham-kukreja/core-jobs-service/internal/derive"
 	"github.com/shubham-kukreja/core-jobs-service/internal/ingest"
 	"github.com/shubham-kukreja/core-jobs-service/internal/jobs"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
@@ -78,6 +79,7 @@ type Deps struct {
 	Catalog     catalog.Catalog
 	Reader      datapoints.Reader
 	Writer      datapoints.Writer
+	Explainer   derive.Explainer
 	Rebuilds    Rebuilder
 	Idempotency IdempotencyStore
 	Connectors  ConnectorLookup
@@ -101,6 +103,7 @@ type Server struct {
 	catalog       catalog.Catalog
 	reader        datapoints.Reader
 	writer        datapoints.Writer
+	explainer     derive.Explainer
 	rebuilds      Rebuilder
 	idem          IdempotencyStore
 	connectors    ConnectorLookup
@@ -126,7 +129,7 @@ func New(cfg Config, d Deps) (http.Handler, error) {
 
 func newServer(cfg Config, d Deps) (*Server, error) {
 	if d.DB == nil || d.Auth == nil || d.Users == nil || d.Audit == nil || d.Catalog == nil ||
-		d.Reader == nil || d.Writer == nil || d.Rebuilds == nil || d.Idempotency == nil || d.Clock == nil ||
+		d.Reader == nil || d.Writer == nil || d.Explainer == nil || d.Rebuilds == nil || d.Idempotency == nil || d.Clock == nil ||
 		d.Jobs.Jobs == nil || d.Jobs.Runs == nil || d.Jobs.Schedules == nil || d.Jobs.Kinds == nil {
 		return nil, errors.New("api: missing dependency")
 	}
@@ -148,7 +151,7 @@ func newServer(cfg Config, d Deps) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg, db: d.DB, auth: d.Auth, users: d.Users, audit: d.Audit, catalog: d.Catalog,
-		reader: d.Reader, writer: d.Writer, rebuilds: d.Rebuilds, idem: d.Idempotency, connectors: d.Connectors, jobs: d.Jobs,
+		reader: d.Reader, writer: d.Writer, explainer: d.Explainer, rebuilds: d.Rebuilds, idem: d.Idempotency, connectors: d.Connectors, jobs: d.Jobs,
 		clock: d.Clock, log: d.Log, cursors: cursors, cop: cop,
 		ipLimiter: d.IPLimiter, userLimiter: d.UserLimiter, loginLimiter: d.LoginLimiter, loginFailures: d.LoginFailures,
 	}
@@ -209,6 +212,7 @@ func (s *Server) routes() http.Handler {
 			r.Get("/series/{key}", s.requireRole(v, s.getSeries))
 			r.Patch("/series/{key}", s.requireRole(admin, s.updateSeries))
 			r.Get("/series/{key}/deps", s.requireRole(v, s.seriesDeps))
+			r.Get("/series/{key}/explain", s.requireRole(v, s.explainSeries))
 
 			r.Post("/datapoints", s.requireRole(a, s.writeDatapoints))
 			r.Get("/series/{key}/datapoints", s.requireRole(v, s.listSeriesDatapoints))
