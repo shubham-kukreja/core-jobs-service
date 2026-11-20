@@ -1,0 +1,13 @@
+.git
+.claude
+bin
+coverage.out
+*.test
+.env
+.env.*
+*.xlsx
+docs
+e2e
+testdata
+**/*_test.go
+**/mocks

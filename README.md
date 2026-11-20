@@ -7,6 +7,8 @@ allocation model, and serves every CORE screen under `/v1`.
 
 - Plan: [`docs/plan.md`](docs/plan.md)
 - Security rules: [`docs/security.md`](docs/security.md)
+- Operations (local stack, monitoring, backups): [`docs/operations.md`](docs/operations.md)
+- Monthly upload runbook: [`docs/runbook-monthly-upload.md`](docs/runbook-monthly-upload.md)
 - Status and decisions: [`HANDOFF.md`](HANDOFF.md)
 - API: [`api/openapi.yaml`](api/openapi.yaml)
 
@@ -19,6 +21,7 @@ make up          # Postgres + S3, migrations, dev runtime user
 make test        # all tests, including database tests
 make lint        # golangci-lint (incl. gosec), govulncheck, seeds, OpenAPI
 make run-api     # http://127.0.0.1:8088/healthz
+make stack-init  # the whole system in Docker: api, worker, Grafana, Jaeger (docs/operations.md)
 make help        # everything else
 ```
 

@@ -22,3 +22,4 @@ coverage.out
 
 # Claude Code local state and agent worktrees
 .claude/
+/deploy/stack/stack.env

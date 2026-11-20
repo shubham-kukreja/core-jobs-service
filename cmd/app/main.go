@@ -8,6 +8,7 @@
 //	app seed apply DIR --as EMAIL
 //	                        write sources, entities, series and import mappings
 //	app user ...            create users, set passwords, issue API keys
+//	app probe URL           health check for containers without a shell
 package main
 
 import (
@@ -31,6 +32,7 @@ commands:
   seed apply <dir> --as <admin email>
                          write sources, entities, series and import mappings
   user <subcommand>      manage users and API keys (run "app user" for help)
+  probe <url>            exit 0 if a loopback health URL answers 200 (container healthchecks)
 `
 
 func main() { os.Exit(exitCode()) }
@@ -70,6 +72,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runSeed(ctx, args[1:], stdout, stderr)
 	case "user":
 		return runUser(ctx, args[1:], stdout, stderr)
+	case "probe":
+		if len(args) != 2 {
+			return errUsage
+		}
+		return probe(ctx, args[1])
 	case "-h", "--help", "help":
 		_, err := fmt.Fprint(stdout, usage)
 		return err

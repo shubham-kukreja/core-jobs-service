@@ -86,3 +86,50 @@ sqlc-check: ## Fail if generated queries are out of date
 .PHONY: mocks
 mocks: ## Generate mocks for module contracts
 	$(MOCKERY)
+
+# ---------------------------------------------------------------- Perf
+.PHONY: perf
+perf: ## Point-in-time read benchmark at PERF_ROWS (default 10M; needs ~5 GB free disk)
+	PERF_ROWS=$${PERF_ROWS:-10000000} TEST_DATABASE_URL='$(TEST_ADMIN_URL)' go test ./e2e/ -run TestPerfPointInTime -count=1 -v -timeout 60m
+
+# ---------------------------------------------------------------- Local stack
+# The whole system on this machine (deploy/stack): api, worker, Postgres, S3,
+# Prometheus, Grafana, Jaeger. Secrets come from deploy/stack/stack.env.
+STACK     := docker compose -f deploy/stack/compose.yml
+STACK_ENV := set -a; . deploy/stack/stack.env; set +a
+
+.PHONY: stack-init
+stack-init: ## First run: build, migrate, create the admin, seed (idempotent)
+	@test -f deploy/stack/stack.env || { echo "copy deploy/stack/stack.env.example to deploy/stack/stack.env and set every value"; exit 1; }
+	@if grep -q 'change-me' deploy/stack/stack.env; then echo "deploy/stack/stack.env still has change-me values"; exit 1; fi
+	$(STACK) build migrate
+	$(STACK) up -d --wait postgres s3
+	echo 's3.bucket.create -name core' | $(STACK) exec -T s3 weed shell >/dev/null
+	$(STACK) run --rm migrate
+	@$(STACK_ENV); $(STACK) run --rm --no-deps api user create --email "$$ADMIN_EMAIL" --name Admin --role admin \
+	  || echo "(admin $$ADMIN_EMAIL already exists)"
+	@$(STACK_ENV); printf '%s\n' "$$ADMIN_PASSWORD" | $(STACK) run --rm -T --no-deps api user set-password --email "$$ADMIN_EMAIL"
+	@$(STACK_ENV); $(STACK) run --rm --no-deps api seed apply /configs/seed --as "$$ADMIN_EMAIL"
+	$(STACK) up -d --wait
+
+.PHONY: stack-up
+stack-up: ## Start (or rebuild and restart) the local stack
+	$(STACK) up -d --build --wait
+
+.PHONY: stack-down
+stack-down: ## Stop the local stack (keeps data)
+	$(STACK) down
+
+.PHONY: stack-logs
+stack-logs: ## Follow api and worker logs
+	$(STACK) logs -f api worker
+
+.PHONY: stack-health
+stack-health: ## Scheduled jobs per day for the last 7 days (the G4 acceptance)
+	@$(STACK) exec -T postgres psql -U core_owner -d core -P pager=off -c "\
+	SELECT (queued_at AT TIME ZONE 'Asia/Kolkata')::date AS day, kind, \
+	       count(*) FILTER (WHERE status = 'succeeded') AS ok, \
+	       count(*) FILTER (WHERE status = 'failed') AS failed, \
+	       count(*) FILTER (WHERE status IN ('queued','running')) AS open \
+	FROM jobs.job_runs WHERE trigger = 'schedule' AND queued_at > now() - interval '7 days' \
+	GROUP BY 1, 2 ORDER BY 1, 2"
