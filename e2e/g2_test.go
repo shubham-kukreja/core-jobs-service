@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -209,13 +210,20 @@ type g2 struct {
 
 func setupG2(ctx context.Context, t *testing.T) *g2 {
 	t.Helper()
+	return newG2(ctx, t, clock.System{}, nil)
+}
+
+// newG2 seeds the shipped configs (after tweak, if any) on a fresh database
+// and starts a worker, all on clk.
+func newG2(ctx context.Context, t *testing.T, clk clock.Clock, tweak func(seed.Documents)) *g2 {
+	t.Helper()
 	db := testdb.New(t)
 	var uid int64
 	if err := db.Owner.QueryRow(ctx,
 		`INSERT INTO auth.users(email,name,role) VALUES ('lead@example.com','Lead','admin') RETURNING id`).Scan(&uid); err != nil {
 		t.Fatal(err)
 	}
-	core, err := app.NewCore(db.Runtime, slog.New(slog.NewTextHandler(io.Discard, nil)), clock.System{})
+	core, err := app.NewCore(db.Runtime, testLogger(), clk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,6 +231,9 @@ func setupG2(ctx context.Context, t *testing.T) *g2 {
 	docs, err := seed.Validate(filepath.Join("..", "configs", "seed"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if tweak != nil {
+		tweak(docs)
 	}
 	if _, err := seed.Apply(ctx, core.SeedTarget(), docs, uid); err != nil {
 		t.Fatal(err)
@@ -238,6 +249,14 @@ func setupG2(ctx context.Context, t *testing.T) *g2 {
 	g := &g2{db: db, core: core, uid: uid, docs: docs}
 	g.drain(ctx, t) // the seed's rebuild over empty history
 	return g
+}
+
+// testLogger discards logs unless E2E_LOG is set, for debugging failures.
+func testLogger() *slog.Logger {
+	if os.Getenv("E2E_LOG") != "" {
+		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	}
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 // drain waits until no job is queued or running and the outbox is empty,

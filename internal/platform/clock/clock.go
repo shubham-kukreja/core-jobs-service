@@ -45,3 +45,33 @@ func (f *Fake) Set(t time.Time) {
 	defer f.mu.Unlock()
 	f.now = t.UTC()
 }
+
+// Shifted is a running clock displaced to another date: it ticks with real
+// time from wherever it was last set. End-to-end tests use it to run a
+// calendar (days or months apart) while writes still get distinct,
+// increasing timestamps, as they would in production. Safe for concurrent use.
+type Shifted struct {
+	mu     sync.Mutex
+	offset time.Duration
+}
+
+// NewShifted returns a clock that reads t now and keeps running.
+func NewShifted(t time.Time) *Shifted {
+	return &Shifted{offset: time.Until(t)}
+}
+
+func (s *Shifted) Now() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Now().Add(s.offset).UTC()
+}
+
+// Set jumps the clock to t; it keeps running from there. Moving backwards
+// is refused, as real time cannot.
+func (s *Shifted) Set(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if next := time.Until(t); next > s.offset {
+		s.offset = next
+	}
+}
