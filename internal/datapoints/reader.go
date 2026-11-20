@@ -119,6 +119,11 @@ func (s *Store) Range(ctx context.Context, series string, from, to civil.Date, o
 	if err != nil {
 		return nil, fmt.Errorf("datapoints: resolve: %w", err)
 	}
+	return scanResolved(rows, series, p)
+}
+
+// scanResolved reads sqlResolveRange rows and closes them.
+func scanResolved(rows pgx.Rows, series string, p readPlan) ([]Resolved, error) {
 	defer rows.Close()
 	var out []Resolved
 	for rows.Next() {
@@ -156,19 +161,52 @@ func (s *Store) Snapshot(ctx context.Context, series []string, d civil.Date, o R
 	if o.Cutoff.IsZero() {
 		o.Cutoff = s.clock.Now() // one cutoff for the whole snapshot
 	}
+	// One round trip: every series' resolution is queued in a single batch.
+	type queued struct {
+		key  string
+		plan readPlan
+	}
+	var qs []queued
+	batch := &pgx.Batch{}
 	for _, key := range series {
-		r, err := s.At(ctx, key, d, o)
+		if _, dup := out[key]; dup {
+			continue
+		}
+		p, err := s.plan(ctx, key, o)
 		if errors.Is(err, catalog.ErrNotFound) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		if r != nil {
-			out[key] = *r
+		if len(p.priority) == 0 {
+			continue
 		}
+		out[key] = Resolved{} // marks the key as queued; replaced or removed below
+		qs = append(qs, queued{key, p})
+		batch.Queue(sqlResolveRange, p.series.ID, dateTime(d), dateTime(d), o.Cutoff.UTC(), p.priority)
 	}
-	return out, nil
+	if len(qs) == 0 {
+		return out, nil
+	}
+	br := s.pool.SendBatch(ctx, batch)
+	defer func() { _ = br.Close() }()
+	for _, q := range qs {
+		rows, err := br.Query()
+		if err != nil {
+			return nil, fmt.Errorf("datapoints: snapshot: %w", err)
+		}
+		rs, err := scanResolved(rows, q.key, q.plan)
+		if err != nil {
+			return nil, err
+		}
+		if len(rs) == 0 {
+			delete(out, q.key)
+			continue
+		}
+		out[q.key] = rs[0]
+	}
+	return out, br.Close()
 }
 
 func (s *Store) Versions(ctx context.Context, series string, d civil.Date) ([]Datapoint, error) {
