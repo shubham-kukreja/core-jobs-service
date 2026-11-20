@@ -93,6 +93,7 @@ type Deps struct {
 	UserLimiter   Limiter
 	LoginLimiter  Limiter
 	LoginFailures FailureTracker
+	Metrics       HTTPMetrics // nil records nothing
 }
 
 // Server holds handler dependencies.
@@ -119,6 +120,7 @@ type Server struct {
 	userLimiter   Limiter
 	loginLimiter  Limiter
 	loginFailures FailureTracker
+	metrics       HTTPMetrics
 }
 
 // New returns the /v1 handler (plus /healthz-style probes stay in cmd/app).
@@ -156,7 +158,10 @@ func newServer(cfg Config, d Deps) (*Server, error) {
 		cfg: cfg, db: d.DB, auth: d.Auth, users: d.Users, audit: d.Audit, catalog: d.Catalog,
 		reader: d.Reader, writer: d.Writer, explainer: d.Explainer, models: d.Models, rebuilds: d.Rebuilds, idem: d.Idempotency, connectors: d.Connectors, jobs: d.Jobs,
 		clock: d.Clock, log: d.Log, cursors: cursors, cop: cop,
-		ipLimiter: d.IPLimiter, userLimiter: d.UserLimiter, loginLimiter: d.LoginLimiter, loginFailures: d.LoginFailures,
+		ipLimiter: d.IPLimiter, userLimiter: d.UserLimiter, loginLimiter: d.LoginLimiter, loginFailures: d.LoginFailures, metrics: d.Metrics,
+	}
+	if s.metrics == nil {
+		s.metrics = nopHTTPMetrics{}
 	}
 	rate := func(r, def Rate) Rate {
 		if r.Burst <= 0 || r.Per <= 0 {
@@ -188,7 +193,7 @@ func newServer(cfg Config, d Deps) (*Server, error) {
 
 func (s *Server) routes() http.Handler {
 	r := chi.NewRouter()
-	r.Use(withRequestID, s.recoverer, s.clientIP, s.accessLog, s.securityHeaders, s.cors, s.crossOrigin, s.limitIP, s.limitBody)
+	r.Use(withRequestID, s.instrument, s.recoverer, s.clientIP, s.accessLog, s.securityHeaders, s.cors, s.crossOrigin, s.limitIP, s.limitBody)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, apperr.New(apperr.NotFound, "Not found"))
 	})

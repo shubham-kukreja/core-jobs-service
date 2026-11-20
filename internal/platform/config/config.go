@@ -62,6 +62,8 @@ type Config struct {
 	// outside development; local SeaweedFS may run without it.
 	BlobSSE bool
 
+	// MetricsAddr is the internal listener for /metrics and probes; empty
+	// disables it. Bind it to a private interface only.
 	MetricsAddr string
 	LogLevel    string
 	Timezone    *time.Location
@@ -115,7 +117,7 @@ func load(lookup lookupFunc) (Config, error) {
 		BlobSecretKey:        r.secret("BLOB_SECRET_KEY", false),
 		BlobUseTLS:           r.bool("BLOB_USE_TLS", true),
 		BlobSSE:              r.bool("BLOB_SSE", true),
-		MetricsAddr:          r.str("METRICS_ADDR", ":9090"),
+		MetricsAddr:          r.str("METRICS_ADDR", "127.0.0.1:9090"),
 		LogLevel:             r.str("LOG_LEVEL", "info"),
 	}
 	tz := r.str("APP_TIMEZONE", "Asia/Kolkata")

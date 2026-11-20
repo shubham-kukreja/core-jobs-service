@@ -127,3 +127,10 @@ WITH RECURSIVE tree AS (
 )
 SELECT * FROM tree ORDER BY depth, id
 LIMIT 1000;
+
+-- name: Backlog :many
+-- Open runs by kind and status for the queue-depth metric.
+SELECT kind, status, count(*)::bigint AS n, min(coalesce(started_at, queued_at))::timestamptz AS oldest
+FROM jobs.job_runs
+WHERE status IN ('queued', 'running')
+GROUP BY kind, status;

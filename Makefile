@@ -45,7 +45,7 @@ run-api: ## Run the API against local containers
 
 .PHONY: run-worker
 run-worker: ## Run the worker against local containers
-	$(DEV_ENV) go run ./cmd/app worker
+	$(DEV_ENV) METRICS_ADDR=127.0.0.1:9091 go run ./cmd/app worker
 
 .PHONY: test
 test: ## Run all tests, including database and S3 tests against local containers

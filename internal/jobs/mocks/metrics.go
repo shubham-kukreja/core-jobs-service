@@ -21,10 +21,10 @@ var _ jobs.Metrics = &Metrics{}
 //
 //		// make and configure a mocked jobs.Metrics
 //		mockedMetrics := &Metrics{
-//			JobFinishedFunc: func(kind string, status jobs.Status, d time.Duration)  {
+//			JobFinishedFunc: func(kind string, trigger jobs.TriggerType, status jobs.Status, d time.Duration)  {
 //				panic("mock out the JobFinished method")
 //			},
-//			JobStartedFunc: func(kind string)  {
+//			JobStartedFunc: func(kind string, trigger jobs.TriggerType)  {
 //				panic("mock out the JobStarted method")
 //			},
 //		}
@@ -35,10 +35,10 @@ var _ jobs.Metrics = &Metrics{}
 //	}
 type Metrics struct {
 	// JobFinishedFunc mocks the JobFinished method.
-	JobFinishedFunc func(kind string, status jobs.Status, d time.Duration)
+	JobFinishedFunc func(kind string, trigger jobs.TriggerType, status jobs.Status, d time.Duration)
 
 	// JobStartedFunc mocks the JobStarted method.
-	JobStartedFunc func(kind string)
+	JobStartedFunc func(kind string, trigger jobs.TriggerType)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -46,6 +46,8 @@ type Metrics struct {
 		JobFinished []struct {
 			// Kind is the kind argument value.
 			Kind string
+			// Trigger is the trigger argument value.
+			Trigger jobs.TriggerType
 			// Status is the status argument value.
 			Status jobs.Status
 			// D is the d argument value.
@@ -55,6 +57,8 @@ type Metrics struct {
 		JobStarted []struct {
 			// Kind is the kind argument value.
 			Kind string
+			// Trigger is the trigger argument value.
+			Trigger jobs.TriggerType
 		}
 	}
 	lockJobFinished sync.RWMutex
@@ -62,23 +66,25 @@ type Metrics struct {
 }
 
 // JobFinished calls JobFinishedFunc.
-func (mock *Metrics) JobFinished(kind string, status jobs.Status, d time.Duration) {
+func (mock *Metrics) JobFinished(kind string, trigger jobs.TriggerType, status jobs.Status, d time.Duration) {
 	if mock.JobFinishedFunc == nil {
 		panic("Metrics.JobFinishedFunc: method is nil but Metrics.JobFinished was just called")
 	}
 	callInfo := struct {
-		Kind   string
-		Status jobs.Status
-		D      time.Duration
+		Kind    string
+		Trigger jobs.TriggerType
+		Status  jobs.Status
+		D       time.Duration
 	}{
-		Kind:   kind,
-		Status: status,
-		D:      d,
+		Kind:    kind,
+		Trigger: trigger,
+		Status:  status,
+		D:       d,
 	}
 	mock.lockJobFinished.Lock()
 	mock.calls.JobFinished = append(mock.calls.JobFinished, callInfo)
 	mock.lockJobFinished.Unlock()
-	mock.JobFinishedFunc(kind, status, d)
+	mock.JobFinishedFunc(kind, trigger, status, d)
 }
 
 // JobFinishedCalls gets all the calls that were made to JobFinished.
@@ -86,14 +92,16 @@ func (mock *Metrics) JobFinished(kind string, status jobs.Status, d time.Duratio
 //
 //	len(mockedMetrics.JobFinishedCalls())
 func (mock *Metrics) JobFinishedCalls() []struct {
-	Kind   string
-	Status jobs.Status
-	D      time.Duration
+	Kind    string
+	Trigger jobs.TriggerType
+	Status  jobs.Status
+	D       time.Duration
 } {
 	var calls []struct {
-		Kind   string
-		Status jobs.Status
-		D      time.Duration
+		Kind    string
+		Trigger jobs.TriggerType
+		Status  jobs.Status
+		D       time.Duration
 	}
 	mock.lockJobFinished.RLock()
 	calls = mock.calls.JobFinished
@@ -102,19 +110,21 @@ func (mock *Metrics) JobFinishedCalls() []struct {
 }
 
 // JobStarted calls JobStartedFunc.
-func (mock *Metrics) JobStarted(kind string) {
+func (mock *Metrics) JobStarted(kind string, trigger jobs.TriggerType) {
 	if mock.JobStartedFunc == nil {
 		panic("Metrics.JobStartedFunc: method is nil but Metrics.JobStarted was just called")
 	}
 	callInfo := struct {
-		Kind string
+		Kind    string
+		Trigger jobs.TriggerType
 	}{
-		Kind: kind,
+		Kind:    kind,
+		Trigger: trigger,
 	}
 	mock.lockJobStarted.Lock()
 	mock.calls.JobStarted = append(mock.calls.JobStarted, callInfo)
 	mock.lockJobStarted.Unlock()
-	mock.JobStartedFunc(kind)
+	mock.JobStartedFunc(kind, trigger)
 }
 
 // JobStartedCalls gets all the calls that were made to JobStarted.
@@ -122,10 +132,12 @@ func (mock *Metrics) JobStarted(kind string) {
 //
 //	len(mockedMetrics.JobStartedCalls())
 func (mock *Metrics) JobStartedCalls() []struct {
-	Kind string
+	Kind    string
+	Trigger jobs.TriggerType
 } {
 	var calls []struct {
-		Kind string
+		Kind    string
+		Trigger jobs.TriggerType
 	}
 	mock.lockJobStarted.RLock()
 	calls = mock.calls.JobStarted

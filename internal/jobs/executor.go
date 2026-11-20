@@ -10,21 +10,30 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/apperr"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 )
 
-// Metrics observes job executions. Implemented with Prometheus in Phase 4.
+// Metrics observes job executions; telemetry.Prometheus implements it.
 type Metrics interface {
-	JobStarted(kind string)
-	JobFinished(kind string, status Status, d time.Duration)
+	JobStarted(kind string, trigger TriggerType)
+	JobFinished(kind string, trigger TriggerType, status Status, d time.Duration)
 }
 
 // NopMetrics discards observations.
 type NopMetrics struct{}
 
-func (NopMetrics) JobStarted(string)                         {}
-func (NopMetrics) JobFinished(string, Status, time.Duration) {}
+func (NopMetrics) JobStarted(string, TriggerType)                         {}
+func (NopMetrics) JobFinished(string, TriggerType, Status, time.Duration) {}
+
+// tracer is the global OpenTelemetry tracer; a no-op until the process
+// installs a provider (telemetry.InitTracing).
+var tracer = otel.Tracer("github.com/shubham-kukreja/core-jobs-service/internal/jobs")
 
 // ExecutorConfig tunes the middleware chain.
 type ExecutorConfig struct {
@@ -114,7 +123,12 @@ func (e *Executor) Execute(ctx context.Context, ex Execution) error {
 		log.Info("job skipped", "status", run.Status)
 		return nil
 	}
-	e.cfg.Metrics.JobStarted(run.Kind)
+	e.cfg.Metrics.JobStarted(run.Kind, run.Trigger)
+
+	ctx, span := tracer.Start(ctx, "job "+run.Kind, trace.WithSpanKind(trace.SpanKindConsumer), trace.WithAttributes(
+		attribute.String("job.kind", run.Kind), attribute.String("job.run_id", run.UUID.String()),
+		attribute.String("job.trigger", string(run.Trigger)), attribute.Int("job.attempt", ex.Attempt)))
+	defer span.End()
 
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -141,7 +155,11 @@ func (e *Executor) Execute(ctx context.Context, ex Execution) error {
 	finished := e.cfg.Clock.Now()
 
 	status, ret := e.settle(ctx, run, ex, out, herr, cause, finished, log)
-	e.cfg.Metrics.JobFinished(run.Kind, status, finished.Sub(started))
+	e.cfg.Metrics.JobFinished(run.Kind, run.Trigger, status, finished.Sub(started))
+	span.SetAttributes(attribute.String("job.status", string(status)))
+	if status == StatusFailed {
+		span.SetStatus(codes.Error, safeError(herr).Code)
+	}
 	return ret
 }
 

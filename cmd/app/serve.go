@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,6 +17,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/config"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/database"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/logging"
+	"github.com/shubham-kukreja/core-jobs-service/internal/platform/telemetry"
 )
 
 const shutdownTimeout = 20 * time.Second
@@ -38,6 +40,50 @@ func bootstrap(ctx context.Context, stderr io.Writer, appName string) (config.Co
 	return cfg, log, pool, nil
 }
 
+// startTelemetry installs tracing (when OTEL_EXPORTER_OTLP_ENDPOINT is set)
+// and serves /metrics, /healthz and /readyz on the internal METRICS_ADDR
+// listener. The returned stop flushes spans and closes the listener.
+func startTelemetry(ctx context.Context, cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, core *app.Core, service string) (stop func(), err error) {
+	shutdownTracing, err := telemetry.InitTracing(ctx, service, buildVersion())
+	if err != nil {
+		return nil, err
+	}
+	var srv *http.Server
+	if cfg.MetricsAddr != "" {
+		mux := healthMux(pool)
+		mux.Handle("GET /metrics", core.Metrics.Handler())
+		srv = &http.Server{Addr: cfg.MetricsAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second}
+		go func() {
+			log.Info("metrics listening", "addr", cfg.MetricsAddr)
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("metrics listener failed", "err", err)
+			}
+		}()
+	}
+	return func() {
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if srv != nil {
+			_ = srv.Shutdown(sctx)
+		}
+		if err := shutdownTracing(sctx); err != nil {
+			log.Warn("trace flush failed", "err", err)
+		}
+	}, nil
+}
+
+// buildVersion is the VCS revision the binary was built from, if known.
+func buildVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" && len(s.Value) >= 12 {
+				return s.Value[:12]
+			}
+		}
+	}
+	return "dev"
+}
+
 func runAPI(ctx context.Context, stderr io.Writer) error {
 	cfg, log, pool, err := bootstrap(ctx, stderr, "core-api")
 	if err != nil {
@@ -48,6 +94,11 @@ func runAPI(ctx context.Context, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	stopTelemetry, err := startTelemetry(ctx, cfg, log, pool, core, "core-api")
+	if err != nil {
+		return err
+	}
+	defer stopTelemetry()
 	if err := enableIngest(ctx, core, cfg, log); err != nil {
 		return err
 	}
@@ -87,6 +138,11 @@ func runWorker(ctx context.Context, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	stopTelemetry, err := startTelemetry(ctx, cfg, log, pool, core, "core-worker")
+	if err != nil {
+		return err
+	}
+	defer stopTelemetry()
 	if err := w.Start(ctx); err != nil {
 		return fmt.Errorf("worker start: %w", err)
 	}

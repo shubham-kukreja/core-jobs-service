@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -116,4 +117,19 @@ func nonNilMap(m map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return m
+}
+
+// Pending counts undispatched outbox events and reports the oldest one's
+// creation time (zero when none), for metrics.
+func (s *Store) Pending(ctx context.Context) (int64, time.Time, error) {
+	var n int64
+	var oldest *time.Time
+	err := s.pool.QueryRow(ctx, `SELECT count(*), min(created_at) FROM dp.outbox WHERE dispatched_at IS NULL`).Scan(&n, &oldest)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("datapoints: outbox pending: %w", err)
+	}
+	if oldest == nil {
+		return n, time.Time{}, nil
+	}
+	return n, *oldest, nil
 }

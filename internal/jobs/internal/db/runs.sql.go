@@ -37,6 +37,46 @@ func (q *Queries) ActiveRunsForSchedule(ctx context.Context, scheduleID *int64) 
 	return items, nil
 }
 
+const backlog = `-- name: Backlog :many
+SELECT kind, status, count(*)::bigint AS n, min(coalesce(started_at, queued_at))::timestamptz AS oldest
+FROM jobs.job_runs
+WHERE status IN ('queued', 'running')
+GROUP BY kind, status
+`
+
+type BacklogRow struct {
+	Kind   string
+	Status string
+	N      int64
+	Oldest time.Time
+}
+
+// Open runs by kind and status for the queue-depth metric.
+func (q *Queries) Backlog(ctx context.Context) ([]BacklogRow, error) {
+	rows, err := q.db.Query(ctx, backlog)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BacklogRow
+	for rows.Next() {
+		var i BacklogRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.Status,
+			&i.N,
+			&i.Oldest,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countPending = `-- name: CountPending :one
 SELECT count(*) FROM jobs.job_runs
 WHERE kind = $1 AND status IN ('queued', 'running')

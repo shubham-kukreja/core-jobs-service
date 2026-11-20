@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/civil"
@@ -24,6 +25,7 @@ import (
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/blob"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/clock"
 	"github.com/shubham-kukreja/core-jobs-service/internal/platform/config"
+	"github.com/shubham-kukreja/core-jobs-service/internal/platform/telemetry"
 	"github.com/shubham-kukreja/core-jobs-service/internal/quality"
 	"github.com/shubham-kukreja/core-jobs-service/internal/seed"
 )
@@ -49,6 +51,9 @@ type Core struct {
 	Jobs          *jobs.Service
 	Runs          *jobs.RunStore
 	Schedules     *jobs.ScheduleStore
+	Metrics       *telemetry.Prometheus
+
+	registerOnce sync.Once
 }
 
 // NewCore builds the shared modules. Job kinds are registered on
@@ -76,6 +81,8 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 		Registry: prims, Clock: clk, Governance: DefaultGovernance,
 	})
 	derive.RegisterCascade(reg, casc)
+	prom := telemetry.NewPrometheus()
+	prom.RegisterPool(pool)
 	qc := quality.NewChecker(cat, dps, DefaultGovernance.PercentileMinObservations)
 	quality.RegisterCheck(reg, qc, clk)
 	return &Core{
@@ -98,6 +105,7 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 		Jobs:          svc,
 		Runs:          jobs.NewRunStore(pool, svc, clk),
 		Schedules:     jobs.NewScheduleStore(pool, reg, types, svc, clk),
+		Metrics:       prom,
 	}, nil
 }
 
@@ -105,7 +113,8 @@ func NewCore(pool *pgxpool.Pool, log *slog.Logger, clk clock.Clock) (*Core, erro
 // dispatcher. The derive.cascade and veto.evaluate subscribers are always
 // installed; subs adds more.
 func (c *Core) NewWorker(subs ...jobs.Subscriber) (*jriver.Worker, error) {
-	exec := jobs.NewExecutor(c.Pool, c.Registry, c.Jobs, jobs.ExecutorConfig{Log: c.Log, Clock: c.Clock})
+	exec := jobs.NewExecutor(c.Pool, c.Registry, c.Jobs, jobs.ExecutorConfig{Log: c.Log, Clock: c.Clock, Metrics: c.Metrics})
+	c.registerBacklogs()
 	sched := jobs.NewScheduler(c.Pool, c.ScheduleTypes, c.Jobs, c.Clock, c.Log)
 	subs = append([]jobs.Subscriber{derive.Subscriber{}, model.VetoSubscriber{}}, subs...)
 	disp := jobs.NewDispatcher(c.Pool, outboxSource{c.Datapoints}, jobs.NewSubscribers(subs...), c.Jobs, c.Log)
@@ -115,6 +124,38 @@ func (c *Core) NewWorker(subs ...jobs.Subscriber) (*jriver.Worker, error) {
 		Scheduler:  sched,
 		Dispatcher: disp,
 		Log:        c.Log,
+	})
+}
+
+// registerBacklogs exports queue depth and outbox lag. Only the worker
+// registers them, so a fleet of API processes does not multiply the series.
+func (c *Core) registerBacklogs() {
+	c.registerOnce.Do(func() {
+		c.Metrics.RegisterBacklog("jobs", "Open job runs by kind and status.", []string{"kind", "status"},
+			func(ctx context.Context) ([]telemetry.Backlog, error) {
+				rows, err := c.Runs.Backlog(ctx)
+				if err != nil {
+					return nil, err
+				}
+				now := c.Clock.Now()
+				out := make([]telemetry.Backlog, len(rows))
+				for i, r := range rows {
+					out[i] = telemetry.Backlog{Labels: []string{r.Kind, string(r.Status)}, Count: float64(r.Count), OldestAge: now.Sub(r.Oldest)}
+				}
+				return out, nil
+			}, c.Log)
+		c.Metrics.RegisterBacklog("outbox", "Undispatched datapoint events.", nil,
+			func(ctx context.Context) ([]telemetry.Backlog, error) {
+				n, oldest, err := c.Datapoints.Pending(ctx)
+				if err != nil {
+					return nil, err
+				}
+				b := telemetry.Backlog{Count: float64(n)}
+				if n > 0 {
+					b.OldestAge = c.Clock.Now().Sub(oldest)
+				}
+				return []telemetry.Backlog{b}, nil
+			}, c.Log)
 	})
 }
 

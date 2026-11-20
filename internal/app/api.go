@@ -72,8 +72,9 @@ func (c *Core) NewAPI(cfg config.Config) (http.Handler, error) {
 			Jobs: c.Jobs, Runs: c.Runs, Schedules: c.Schedules, Kinds: c.Registry,
 			Uploads: c.Uploads, Mappings: c.Mappings,
 		},
-		Clock: c.Clock,
-		Log:   c.Log,
+		Clock:   c.Clock,
+		Log:     c.Log,
+		Metrics: c.Metrics,
 	})
 }
 

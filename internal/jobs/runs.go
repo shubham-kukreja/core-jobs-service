@@ -307,3 +307,24 @@ func (s *RunStore) UUIDs(ctx context.Context, ids []int64) (map[int64]uuid.UUID,
 	}
 	return out, rows.Err()
 }
+
+// BacklogRow counts open runs of one kind and status.
+type BacklogRow struct {
+	Kind   string
+	Status Status
+	Count  int64
+	Oldest time.Time // queued_at for queued runs, started_at for running ones
+}
+
+// Backlog reports queued and running runs by kind, for metrics.
+func (s *RunStore) Backlog(ctx context.Context) ([]BacklogRow, error) {
+	rows, err := db.New(s.pool).Backlog(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: backlog: %w", err)
+	}
+	out := make([]BacklogRow, len(rows))
+	for i, r := range rows {
+		out[i] = BacklogRow{Kind: r.Kind, Status: Status(r.Status), Count: r.N, Oldest: r.Oldest}
+	}
+	return out, nil
+}
